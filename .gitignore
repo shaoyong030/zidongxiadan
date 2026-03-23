@@ -1,0 +1,13 @@
+# 忽略浏览器缓存和数据（这是让你转圈的元凶）
+chrome_data/
+ChromeFeatureState/
+last_version
+chrome_data_journal
+
+# 忽略 Python 运行缓存
+__pycache__/
+*.pyc
+
+# 忽略数据库临时文件
+*.db-journal
+*.db
