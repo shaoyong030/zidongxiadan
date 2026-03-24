@@ -4,7 +4,6 @@ import time
 import re
 import pyperclip
 import os 
-import datetime  # 👈 新增：用于获取当前时间
 
 def run_pdd_to_taobao_task(stop_event):
     log_buffer = []
@@ -31,7 +30,6 @@ def run_pdd_to_taobao_task(stop_event):
     seen_green_sns = set() 
     seen_merged_sns = set() 
     all_seen_pdd_sns = set()
-    out_of_hours_logged = set() # 👈 新增：用于记录非营业时间已打印过日志的订单防刷屏
 
     try:
         df = pd.read_excel('/Users/shaoyong/Desktop/zidongxiadan/商品下单链接映射表.xlsx')
@@ -148,15 +146,8 @@ def run_pdd_to_taobao_task(stop_event):
                     if tb_match:
                         tid = tb_match.group()
                         if tid not in already_checked_logistics:
-                            # 👈 修改：引入时间判断拦截
-                            current_hour = datetime.datetime.now().hour
-                            if 8 <= current_hour < 17:
-                                dlog(f"     ∟ 命中[逻辑1]: 标绿待查物流 ({tid})")
-                                action, tb_id, current_sn = "LOGISTICS", tid, sn; break
-                            else:
-                                if sn not in out_of_hours_logged:
-                                    dlog(f"     ∟ [时间限制]: 当前非 8:00-17:00，跳过物流更新，仅保持监控 ({tid})")
-                                    out_of_hours_logged.add(sn)
+                            dlog(f"     ∟ 命中[逻辑1]: 标绿待查物流 ({tid})")
+                            action, tb_id, current_sn = "LOGISTICS", tid, sn; break
                 
                 elif sn in merge_success_map:
                     dlog(f"     ∟ 命中[逻辑2]: 购物车合单成功，为该子订单回填并打绿标！")
@@ -175,6 +166,7 @@ def run_pdd_to_taobao_task(stop_event):
                         action = "PROCESS_MERGE_PAGE"; break 
                     
                     if sn in merged_sns:
+                        # 🚀 V75.0 核心逻辑修改：如果单号在合并名单中，但上一轮合单没买成功，直接屏蔽过滤，不打任何备注
                         dlog(f"     ∟ [跳过] 该单虽在合并名单中，但未下单成功，将其列入过滤黑名单。")
                         processed_sns.add(sn)
                         continue
@@ -459,10 +451,12 @@ def run_pdd_to_taobao_task(stop_event):
                     except Exception as e:
                         dlog(f"   ∟ [报错] 地址填写模块发生崩溃: {e}")
 
+                    # 失败则直接continue跳过，不加备注
                     if not address_filled_success: 
                         continue
 
                     dlog("   ∟ [动作] 🚀 准备点击新版提交订单...")
+                    # 🚀 V75.0 终极修复：使用底层JS同时对准内外层节点狂暴点击，抗击React渲染延迟
                     submit_success = False
                     for _ in range(4):
                         click_result = tb_page.evaluate('''() => {
@@ -533,6 +527,7 @@ def run_pdd_to_taobao_task(stop_event):
                     remark_btn = current_order_block.locator('a:has-text("添加备注"), a:has-text("修改备注")').first
                     remark_btn.click(force=True); time.sleep(1.5)
                     
+                    # 🚀 V75.0 绝对纯净回填，不加“合并发货”等任何冗余文字
                     pdd_page.locator('textarea.note-textarea').first.fill(str(tb_id))
                     time.sleep(1)
                     
