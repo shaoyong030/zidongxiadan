@@ -11,9 +11,11 @@ SCHEDULE_INTERVAL = 3600
 # 🚀 这里的接口会根据下面尝试的结果自动修正
 OPENCLAW_BASE = "http://127.0.0.1:18789" 
 
+# 🚀 硬编码你的专属 Chat ID
+ADMIN_CHAT_ID = "8693156373"
+
 stop_event = threading.Event()
 task_thread = None
-admin_chat_id = None
 # =========================================
 
 def dlog(msg):
@@ -60,21 +62,26 @@ def task_wrapper(chat_id):
         task_thread = None
 
 def auto_scheduler():
-    global task_thread, admin_chat_id
+    global task_thread
     while True:
         time.sleep(SCHEDULE_INTERVAL) 
-        if admin_chat_id:
-            if not (task_thread and task_thread.is_alive()):
-                send_message(admin_chat_id, "⏰ [自动巡检] 开始执行...")
-                task_thread = threading.Thread(target=task_wrapper, args=(admin_chat_id,))
-                task_thread.start()
+        if not (task_thread and task_thread.is_alive()):
+            send_message(ADMIN_CHAT_ID, "⏰ [自动巡检] 触发每小时常规执行...")
+            task_thread = threading.Thread(target=task_wrapper, args=(ADMIN_CHAT_ID,))
+            task_thread.start()
 
 def start_bot():
-    global task_thread, admin_chat_id
+    global task_thread
     print("\n" + "*"*50)
     print("🤖 [系统] 搬砖通讯兵 V64.2 (寻路修正版) 上线！")
     print("🚦 监听中：1下单 / 2停止 / 截图 / 其他指令问AI")
     print("*"*50 + "\n")
+    
+    # 🚀 核心修改：加上异常捕获防弹衣，防止 PM2 在启动瞬间因网络波动错杀进程
+    try:
+        send_message(ADMIN_CHAT_ID, "🟢 系统已启动，每小时自动巡检任务已激活并在后台运行。")
+    except Exception as e:
+        dlog(f"⚠️ 启动通知发送失败 (网络波动)，但系统将继续运行: {e}")
     
     threading.Thread(target=auto_scheduler, daemon=True).start()
     
@@ -89,7 +96,6 @@ def start_bot():
                 text = msg.get("text", "")
                 
                 if not chat_id: continue
-                if admin_chat_id is None: admin_chat_id = chat_id
 
                 if text == "1":
                     if task_thread and task_thread.is_alive(): send_message(chat_id, "⚠️ 运行中...")
