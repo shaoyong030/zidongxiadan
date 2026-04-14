@@ -147,14 +147,8 @@ def run_pdd_to_taobao_task(stop_event):
                     if tb_match:
                         tid = tb_match.group()
                         if tid not in already_checked_logistics:
-                            current_hour = datetime.datetime.now().hour
-                            if 8 <= current_hour < 17:
-                                dlog(f"     ∟ 命中[逻辑1]: 标绿待查物流 ({tid})")
-                                action, tb_id, current_sn = "LOGISTICS", tid, sn; break
-                            else:
-                                if sn not in out_of_hours_logged:
-                                    dlog(f"     ∟ [时间限制]: 当前非 8:00-17:00，跳过物流更新，仅保持监控 ({tid})")
-                                    out_of_hours_logged.add(sn)
+                            dlog(f"     ∟ 命中[逻辑1]: 标绿待查物流 ({tid})")
+                            action, tb_id, current_sn = "LOGISTICS", tid, sn; break
                 
                 elif sn in merge_success_map:
                     dlog(f"     ∟ 命中[逻辑2]: 购物车合单成功，为该子订单回填并打绿标！")
@@ -205,6 +199,17 @@ def run_pdd_to_taobao_task(stop_event):
                 time.sleep(4)
                 merged_sns = set() 
 
+                qty_col_idx_merge = -1
+                try:
+                    qty_col_idx_merge = pdd_page.evaluate('''() => {
+                        let ths = document.querySelectorAll('th');
+                        for(let i=0; i<ths.length; i++) {
+                            if(ths[i].innerText && ths[i].innerText.includes('数量')) return i;
+                        }
+                        return -1;
+                    }''')
+                except: pass
+                
                 order_rows = pdd_page.locator('tr').all()
                 merge_groups = []
                 current_group = None
@@ -222,8 +227,21 @@ def run_pdd_to_taobao_task(stop_event):
                             sn = sn_match.group()
                             merged_sns.add(sn)
                             pdd_id_match = re.search(r'ID:\s*(\d+)', txt)
-                            qty_match = re.search(r'\s+(\d+)\s+\d+\.\d{2}', txt)
-                            qty = int(qty_match.group(1)) if qty_match else 1
+                            qty = 1
+                            if qty_col_idx_merge != -1:
+                                try:
+                                    qty_text = row.locator(f'td:nth-child({qty_col_idx_merge + 1})').inner_text()
+                                    match = re.search(r'\d+', qty_text)
+                                    if match: qty = int(match.group())
+                                except: pass
+                                
+                            if qty == 1:
+                                # Fallback robust regex
+                                qty_match = re.search(r'(?:¥\s*\d+\.\d{2}|\d+\.\d{2})\s+(\d+)\s+(?:¥\s*\d+\.\d{2}|\d+\.\d{2})', txt)
+                                if not qty_match:
+                                    qty_match = re.search(r'\s+(\d+)\s+(?:¥\s*)?\d+\.\d{2}', txt)
+                                qty = int(qty_match.group(1)) if qty_match else 1
+                                
                             current_group['items'].append({'sn': sn, 'pdd_id': pdd_id_match.group(1) if pdd_id_match else None, 'qty': qty})
                 if current_group and len(current_group['items']) > 0: merge_groups.append(current_group)
 
@@ -292,11 +310,12 @@ def run_pdd_to_taobao_task(stop_event):
                         qty = item['qty']
                         if qty > 1:
                             try:
-                                qty_input = tb_page.locator('input.countValue, input.tb-text, input.count, input[title="请输入购买量"]').first
+                                qty_input = tb_page.locator('input.countValue, input.tb-text, input.count, input[title="请输入购买量"], input[type="number"]').first
                                 if qty_input.is_visible(): qty_input.fill(str(qty)); time.sleep(1)
                                 else:
                                     for _ in range(qty - 1):
-                                        plus_btn = tb_page.locator('.countValuePlus, .increase, .tb-increase, .mui-amount-btn-increase, a[title="增加数量"], button.plus, span.plus, a:has-text("+")').first
+                                        plus_btn = tb_page.locator('.countValuePlus, .increase, .tb-increase, .mui-amount-btn-increase, a[title="增加数量"], button.plus, span.plus, a:has-text("+"), button:has-text("+")').first
+                                        if not plus_btn.is_visible(): plus_btn = tb_page.get_by_text("+", exact=True).first
                                         if plus_btn.is_visible(): plus_btn.click(force=True); time.sleep(0.5)
                             except: pass
 
@@ -464,29 +483,40 @@ def run_pdd_to_taobao_task(stop_event):
                         processed_sns.add(current_sn)
                         continue
 
-                    # ================= V76.2 终极强杀：抛弃 input 判定，直接看 UI 类名 =================
+                    # ================= V76.5 终极强杀：单次闭环判定 =================
                     dlog("   ∟ [动作] 检查是否需要勾选支付币种...")
                     try:
-                        rmb_label = tb_page.locator('label').filter(has_text=re.compile(r"人民币")).first
-                        if rmb_label.is_visible(timeout=2000):
-                            # 不去管隐藏的 input，直接看渲染出来的 span 是否包含 checked 类名
-                            is_checked = rmb_label.locator('.ant-checkbox-checked').count() > 0
+                        # 锁定人民币所在的完整选项
+                        rmb_option = tb_page.locator('label.ant-checkbox-wrapper').filter(has_text=re.compile(r"人民币")).first
+                        if rmb_option.is_visible(timeout=6000):
                             
-                            # 兜底：如果 AntD 的类名变了，尝试用原生 js 获取一下 input 的 checked 属性
-                            if not is_checked:
-                                is_checked = rmb_label.evaluate('''node => {
-                                    let input = node.querySelector('input[type="checkbox"]');
+                            def is_rmb_checked():
+                                return rmb_option.evaluate('''node => {
+                                    let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
                                     return input ? input.checked : false;
                                 }''')
 
-                            if not is_checked:
-                                dlog("   ∟ [动作] 💰 发现未勾选，强行精准点击【人民币】！")
-                                rmb_label.click(force=True)
-                                try: rmb_label.evaluate("node => node.click()")
-                                except: pass
-                                time.sleep(1.5)
+                            if not is_rmb_checked():
+                                dlog("   ∟ [动作] 💰执行【人民币】勾选！")
+                                # 方案1: 直接强点
+                                rmb_option.click(force=True)
+                                time.sleep(1)
+                                
+                                # 再判定，如果由于意外没点上，用 JS 原生点
+                                if not is_rmb_checked():
+                                    dlog("   ∟ [动作] ⚠️ Playwright点击失效，启动JS强点！")
+                                    rmb_option.evaluate('''node => {
+                                        let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
+                                        if (input && !input.checked) input.click();
+                                    }''')
+                                time.sleep(1)
+                                
+                            if is_rmb_checked():
+                                dlog("   ∟ [状态] ✅ 【人民币】勾选成功。")
                             else:
-                                dlog("   ∟ [状态] 💰 【人民币】已是勾选状态。")
+                                dlog("   ∟ [状态] ❌ 【人民币】未能勾选。")
+                        else:
+                            dlog("   ∟ [警告] 未能找到人民币选项，页面可能未完全加载。")
                     except Exception as e:
                         dlog(f"   ∟ [跳过] 币种勾选异常: {e}")
                     # ========================================================================
@@ -640,13 +670,14 @@ def run_pdd_to_taobao_task(stop_event):
                     if current_quantity > 1:
                         dlog(f"   ∟ [动作] 检测到需下单数量为 {current_quantity}，开始调整淘宝数量...")
                         try:
-                            qty_input = tb_page.locator('input.countValue, input.tb-text, input.count, input[title="请输入购买量"]').first
+                            qty_input = tb_page.locator('input.countValue, input.tb-text, input.count, input[title="请输入购买量"], input[type="number"]').first
                             if qty_input.is_visible():
                                 qty_input.fill(str(current_quantity))
                                 time.sleep(1)
                             else:
                                 for _ in range(current_quantity - 1):
-                                    plus_btn = tb_page.locator('.countValuePlus, .increase, .tb-increase, .mui-amount-btn-increase, a[title="增加数量"], button.plus, span.plus, a:has-text("+")').first
+                                    plus_btn = tb_page.locator('.countValuePlus, .increase, .tb-increase, .mui-amount-btn-increase, a[title="增加数量"], button.plus, span.plus, a:has-text("+"), button:has-text("+")').first
+                                    if not plus_btn.is_visible(): plus_btn = tb_page.get_by_text("+", exact=True).first
                                     if plus_btn.is_visible(): plus_btn.click(force=True); time.sleep(0.5)
                         except: pass
 
@@ -758,30 +789,40 @@ def run_pdd_to_taobao_task(stop_event):
                         processed_sns.add(current_sn)
                         continue
 
-                    # ================= V76.2 终极强杀：抛弃 input 判定，直接看 UI 类名 =================
+                    # ================= V76.5 终极强杀：单次闭环判定 =================
                     dlog("   ∟ [动作] 检查是否需要勾选支付币种...")
                     try:
-                        rmb_label = tb_page.locator('label').filter(has_text=re.compile(r"人民币")).first
-                        if rmb_label.is_visible(timeout=2000):
-                            # 不去管隐藏的 input，直接看渲染出来的 span 是否包含 checked 类名
-                            is_checked = rmb_label.locator('.ant-checkbox-checked').count() > 0
+                        # 锁定人民币所在的完整选项
+                        rmb_option = tb_page.locator('label.ant-checkbox-wrapper').filter(has_text=re.compile(r"人民币")).first
+                        if rmb_option.is_visible(timeout=6000):
                             
-                            # 兜底：如果 AntD 的类名变了，尝试用原生 js 获取一下 input 的 checked 属性
-                            if not is_checked:
-                                is_checked = rmb_label.evaluate('''node => {
-                                    let input = node.querySelector('input[type="checkbox"]');
+                            def is_rmb_checked():
+                                return rmb_option.evaluate('''node => {
+                                    let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
                                     return input ? input.checked : false;
                                 }''')
 
-                            if not is_checked:
-                                dlog("   ∟ [动作] 💰 发现未勾选，强行精准点击【人民币】！")
-                                # 双重点击法：先用 Playwright 强点，如果被透明层挡住，再用 JS 原生点
-                                rmb_label.click(force=True)
-                                try: rmb_label.evaluate("node => node.click()")
-                                except: pass
-                                time.sleep(1.5)
+                            if not is_rmb_checked():
+                                dlog("   ∟ [动作] 💰执行【人民币】勾选！")
+                                # 方案1: 直接强点
+                                rmb_option.click(force=True)
+                                time.sleep(1)
+                                
+                                # 再判定，如果由于意外没点上，用 JS 原生点
+                                if not is_rmb_checked():
+                                    dlog("   ∟ [动作] ⚠️ Playwright点击失效，启动JS强点！")
+                                    rmb_option.evaluate('''node => {
+                                        let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
+                                        if (input && !input.checked) input.click();
+                                    }''')
+                                time.sleep(1)
+                                
+                            if is_rmb_checked():
+                                dlog("   ∟ [状态] ✅ 【人民币】勾选成功。")
                             else:
-                                dlog("   ∟ [状态] 💰 【人民币】已是勾选状态。")
+                                dlog("   ∟ [状态] ❌ 【人民币】未能勾选。")
+                        else:
+                            dlog("   ∟ [警告] 未能找到人民币选项，页面可能未完全加载。")
                     except Exception as e:
                         dlog(f"   ∟ [跳过] 币种勾选异常: {e}")
                     # ========================================================================

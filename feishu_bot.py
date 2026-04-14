@@ -41,7 +41,9 @@ def get_updates(offset=None):
     try:
         res = requests.get(url, params={"timeout": 20, "offset": offset}, proxies=PROXIES, timeout=30)
         return res.json()
-    except: return None
+    except Exception as e:
+        dlog(f"获取消息失败, 请检查网络/代理模块: {e}")
+        return None
 
 def send_long_message(chat_id, text):
     parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
@@ -63,8 +65,16 @@ def task_wrapper(chat_id):
 
 def auto_scheduler():
     global task_thread
+    import datetime
     while True:
         time.sleep(SCHEDULE_INTERVAL) 
+        
+        # 限制时间段：17点到次日8点不自动执行下单和发货
+        now = datetime.datetime.now()
+        if now.hour >= 17 or now.hour < 8:
+            send_message(ADMIN_CHAT_ID, f"⏸ [自动巡检] 当前时间 {now.strftime('%H:%M')} 在非工作时段(17:00-08:00)，跳过自动执行。若急需更新请手动发送1")
+            continue
+
         if not (task_thread and task_thread.is_alive()):
             send_message(ADMIN_CHAT_ID, "⏰ [自动巡检] 触发每小时常规执行...")
             task_thread = threading.Thread(target=task_wrapper, args=(ADMIN_CHAT_ID,))
