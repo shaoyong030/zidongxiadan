@@ -314,9 +314,12 @@ def run_pdd_to_taobao_task(stop_event):
                                 if qty_input.is_visible(): qty_input.fill(str(qty)); time.sleep(1)
                                 else:
                                     for _ in range(qty - 1):
-                                        plus_btn = tb_page.locator('.countValuePlus, .increase, .tb-increase, .mui-amount-btn-increase, a[title="增加数量"], button.plus, span.plus, a:has-text("+"), button:has-text("+")').first
-                                        if not plus_btn.is_visible(): plus_btn = tb_page.get_by_text("+", exact=True).first
-                                        if plus_btn.is_visible(): plus_btn.click(force=True); time.sleep(0.5)
+                    plus_btn = tb_page.locator('.countValuePlus, .increase, .tb-increase, .mui-amount-btn-increase, a[title="增加数量"], button.plus, span.plus, a:has-text("+"), button:has-text("+")').first
+                    plus_btn = tb_page.locator('.countValuePlus, .increase, .tb-increase, .mui-amount-btn-increase, a[title="增加数量"], button.plus, span.plus, a:has-text("+"), button:has-text("+")').first
+                    if not plus_btn.is_visible(): plus_btn = tb_page.get_by_text("+", exact=True).first
+                    if not plus_btn.is_visible(): plus_btn = tb_page.get_by_text("+", exact=True).first
+                    if plus_btn.is_visible(): plus_btn.click(force=True); time.sleep(0.5)
+                    if plus_btn.is_visible(): plus_btn.click(force=True); time.sleep(0.5)
                             except: pass
 
                         try:
@@ -384,21 +387,38 @@ def run_pdd_to_taobao_task(stop_event):
                     dlog("   ∟ [动作] 检查已有地址是否匹配...")
                     try:
                         matched = tb_page.evaluate(f'''(buyer) => {{
-                            let targetBlock = null;
-                            let cards = Array.from(document.querySelectorAll('div, li')).filter(el => el.innerText && el.innerText.includes(buyer.name) && el.innerText.includes(buyer.phone.substring(buyer.phone.length - 4)) && el.innerText.length < 300);
-                            for (let el of cards) {{
-                                if (el.className && typeof el.className === 'string' && (el.className.toLowerCase().includes('address') || el.className.toLowerCase().includes('item'))) {{ targetBlock = el; break; }}
+                            let name = buyer.name;
+                            let phone = buyer.phone;
+                            let phoneLast4 = phone.length > 4 ? phone.substring(phone.length - 4) : phone;
+                            
+                            // 查找可能包含地址信息的区块
+                            let allBlocks = Array.from(document.querySelectorAll('div, li')).filter(el => 
+                                el.innerText && el.innerText.includes(name) && el.innerText.includes(phoneLast4) &&
+                                el.innerText.length < 300 && el.children.length > 0
+                            );
+                            
+                            if (allBlocks.length > 0) {{
+                                // 找到最深层但也包含这些信息的节点，或者直接点击外层
+                                let target = allBlocks[allBlocks.length - 1]; // 通常最后的都是最具体的元素
+                                // 尝试从所有的 allBlocks 中找到一个包含 '修改' 或类似特征的卡片
+                                let card = allBlocks.find(el => el.className && typeof el.className === 'string' && (el.className.toLowerCase().includes('address') || el.className.toLowerCase().includes('item')));
+                                if (card) target = card;
+                                
+                                target.click();
+                                let inner = target.querySelector('div, span');
+                                if (inner) inner.click();
+                                return true;
                             }}
-                            if (!targetBlock && cards.length > 0) targetBlock = cards[cards.length - 1];
-                            if (targetBlock) {{ targetBlock.click(); let inner = targetBlock.querySelector('div, span'); if (inner) inner.click(); return true; }}
                             return false;
                         }}''', {'name': buyer_name, 'phone': buyer_phone})
+                        
                         if matched:
                             dlog("   ∟ [成功] ✅ 找到匹配的已有地址，已自动选中。")
                             address_filled_success = True
                             time.sleep(1.5)
-                    except Exception as e: pass
-
+                    except Exception as e:
+                        dlog(f"   ∟ [提醒] 匹配已有地址失败，准备新增: {e}")
+                        
                     if not address_filled_success:
                         try:
                             new_addr_btn = tb_page.locator('text=使用新地址').first
@@ -414,7 +434,7 @@ def run_pdd_to_taobao_task(stop_event):
                             address_context = tb_page
                             if tb_page.locator('text=使用新地址').is_visible(): dlog('   ∟ [警告] 新增地址弹窗可能未打开！')
 
-                        smart_box = address_context.locator('textarea[placeholder*=\"识别\"], textarea[placeholder*=\"粘贴\"], .smart-address-textarea').first
+                        smart_box = address_context.locator('textarea[placeholder*=\"识别\"], textarea[placeholder*=\"粘贴\"], textarea[placeholder*=\"智能\"], .smart-address-textarea').first
                         if smart_box.is_visible():
                             dlog("   ∟ [动作] 发现智能输入框，打入地址并触发解析...")
                             try:
@@ -448,13 +468,19 @@ def run_pdd_to_taobao_task(stop_event):
                                 for part in parts_to_click:
                                     if not part: continue
                                     try:
-                                        address_context.locator(f'li:has-text("{part}")').first.click(timeout=1500)
-                                        time.sleep(0.5)
+                    address_context.locator(f'li:has-text("{part}")').first.click(timeout=1500)
+                    address_context.locator(f'li:has-text("{part}")').first.click(timeout=1500)
+                    time.sleep(0.5)
+                    time.sleep(0.5)
                                     except:
-                                        short = re.sub(r'[省市县区自治区]', '', part)
-                                        if short and len(short) >= 2:
-                                            try: address_context.locator(f'li:has-text("{short}")').first.click(timeout=1500); time.sleep(0.5)
-                                            except: pass
+                    short = re.sub(r'[省市县区自治区]', '', part)
+                    short = re.sub(r'[省市县区自治区]', '', part)
+                    if short and len(short) >= 2:
+                    if short and len(short) >= 2:
+                        try: address_context.locator(f'li:has-text("{short}")').first.click(timeout=1500); time.sleep(0.5)
+                        try: address_context.locator(f'li:has-text("{short}")').first.click(timeout=1500); time.sleep(0.5)
+                        except: pass
+                        except: pass
                                 
                                 try: address_context.locator('li:has-text("暂不选择")').first.click(timeout=800); time.sleep(0.5)
                                 except: 
@@ -513,8 +539,10 @@ def run_pdd_to_taobao_task(stop_event):
                                 if address_context.locator('input#fullName').first.is_visible(timeout=1000):
                                     dlog("   ∟ [失败] ❌ 终极地址保存异常，表单被系统拦截卡住。")
                                     try:
-                                        err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
-                                        if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
+                    err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
+                    err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
+                    if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
+                    if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
                                     except: pass
                                 else: address_filled_success = True
                             else: address_filled_success = True
@@ -529,28 +557,73 @@ def run_pdd_to_taobao_task(stop_event):
                         processed_sns.add(current_sn)
                         continue
 
-                    dlog("   ∟ [动作] 等待并校验最终地址 (防异步渲染)....")
-                    time.sleep(2.5) 
+                    # ========================================================================
+
+                    # 提交前双重确认地址
+                    # 提交前双重确认地址
+
+                    # ========================================================================
+                    # ========================================================================
+
+                    dlog("   ∟ [动作] 提交订单前，最后确认地址是否匹配...")
+                    dlog("   ∟ [动作] 提交订单前，最后确认地址是否匹配...")
+
                     try:
-                        checked_matched = False
-                        for _ in range(4):
-                            checked_matched = tb_page.evaluate(f'''(buyer) => {{
-                                let text = document.body.innerText.replace(/\\s+/g, '');
-                                let name = buyer.name.replace(/\\s+/g, '');
-                                let phoneLast4 = buyer.phone.substring(buyer.phone.length - 4);
-                                let phoneMasked = buyer.phone.substring(0,3) + "****" + phoneLast4;
-                                return text.includes(name) && (text.includes(phoneLast4) || text.includes(phoneMasked) || text.includes(buyer.phone));
-                            }}''', {'name': buyer_name, 'phone': buyer_phone})
-                            if checked_matched: break
-                            time.sleep(1.5)
-                            
+                    try:
+
+                        checked_matched = tb_page.evaluate(f'''(buyer) => {{
+                        checked_matched = tb_page.evaluate(f'''(buyer) => {{
+
+                            let name = buyer.name;
+                            let name = buyer.name;
+
+                            let phoneLast4 = buyer.phone.substring(buyer.phone.length - 4);
+                            let phoneLast4 = buyer.phone.substring(buyer.phone.length - 4);
+
+                            // 在“确认订单信息”之前的核心区域查找选中的地址
+                            // 在“确认订单信息”之前的核心区域查找选中的地址
+
+                            // 或者干脆全屏找有没有高亮的/当前显示的地址
+                            // 或者干脆全屏找有没有高亮的/当前显示的地址
+
+                            let text = document.body.innerText;
+                            let text = document.body.innerText;
+
+                            if (text.includes(name) && text.includes(phoneLast4)) return true;
+                            if (text.includes(name) && text.includes(phoneLast4)) return true;
+
+                            return false;
+                            return false;
+
+                        }}''', {'name': buyer_name, 'phone': buyer_phone})
+                        }}''', {'name': buyer_name, 'phone': buyer_phone})
+
+                        
+                        
+
                         if not checked_matched:
-                            dlog("   ∟ [严重失败] ❌ 多次探测仍未在最终页面找到买家信息！放弃提交。")
+                        if not checked_matched:
+
+                            dlog("   ∟ [严重失败] ❌ 最终准备提交的订单地址中，找不到目标买家姓名和手机号尾号！放弃提交。")
+                            dlog("   ∟ [严重失败] ❌ 最终准备提交的订单地址中，找不到目标买家姓名和手机号尾号！放弃提交。")
+
                             processed_sns.add(current_sn)
+                            processed_sns.add(current_sn)
+
                             continue
+                            continue
+
                         else:
+                        else:
+
                             dlog("   ∟ [成功] ✅ 地址最终匹配无误，继续提交。")
+                            dlog("   ∟ [成功] ✅ 地址最终匹配无误，继续提交。")
+
                     except: pass
+                    except: pass
+
+                    # ========================================================================
+                    # ========================================================================
 
                     # ================= V76.5 终极强杀：单次闭环判定 =================
                     dlog("   ∟ [动作] 检查是否需要勾选支付币种...")
@@ -575,8 +648,10 @@ def run_pdd_to_taobao_task(stop_event):
                                 if not is_rmb_checked():
                                     dlog("   ∟ [动作] ⚠️ Playwright点击失效，启动JS强点！")
                                     rmb_option.evaluate('''node => {
-                                        let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
-                                        if (input && !input.checked) input.click();
+                    let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
+                    let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
+                    if (input && !input.checked) input.click();
+                    if (input && !input.checked) input.click();
                                     }''')
                                 time.sleep(3)
                                 
@@ -692,7 +767,6 @@ def run_pdd_to_taobao_task(stop_event):
                     dlog(f"   ∟ [报错] 合单子订单回填异常: {e}"); processed_sns.add(current_sn)
                 continue
 
-
             # ==========================================
             # 执行区 1：普通单笔自动下单 
             # ==========================================
@@ -760,21 +834,38 @@ def run_pdd_to_taobao_task(stop_event):
                     dlog("   ∟ [动作] 检查已有地址是否匹配...")
                     try:
                         matched = tb_page.evaluate(f'''(buyer) => {{
-                            let targetBlock = null;
-                            let cards = Array.from(document.querySelectorAll('div, li')).filter(el => el.innerText && el.innerText.includes(buyer.name) && el.innerText.includes(buyer.phone.substring(buyer.phone.length - 4)) && el.innerText.length < 300);
-                            for (let el of cards) {{
-                                if (el.className && typeof el.className === 'string' && (el.className.toLowerCase().includes('address') || el.className.toLowerCase().includes('item'))) {{ targetBlock = el; break; }}
+                            let name = buyer.name;
+                            let phone = buyer.phone;
+                            let phoneLast4 = phone.length > 4 ? phone.substring(phone.length - 4) : phone;
+                            
+                            // 查找可能包含地址信息的区块
+                            let allBlocks = Array.from(document.querySelectorAll('div, li')).filter(el => 
+                                el.innerText && el.innerText.includes(name) && el.innerText.includes(phoneLast4) &&
+                                el.innerText.length < 300 && el.children.length > 0
+                            );
+                            
+                            if (allBlocks.length > 0) {{
+                                // 找到最深层但也包含这些信息的节点，或者直接点击外层
+                                let target = allBlocks[allBlocks.length - 1]; // 通常最后的都是最具体的元素
+                                // 尝试从所有的 allBlocks 中找到一个包含 '修改' 或类似特征的卡片
+                                let card = allBlocks.find(el => el.className && typeof el.className === 'string' && (el.className.toLowerCase().includes('address') || el.className.toLowerCase().includes('item')));
+                                if (card) target = card;
+                                
+                                target.click();
+                                let inner = target.querySelector('div, span');
+                                if (inner) inner.click();
+                                return true;
                             }}
-                            if (!targetBlock && cards.length > 0) targetBlock = cards[cards.length - 1];
-                            if (targetBlock) {{ targetBlock.click(); let inner = targetBlock.querySelector('div, span'); if (inner) inner.click(); return true; }}
                             return false;
                         }}''', {'name': buyer_name, 'phone': buyer_phone})
+                        
                         if matched:
                             dlog("   ∟ [成功] ✅ 找到匹配的已有地址，已自动选中。")
                             address_filled_success = True
                             time.sleep(1.5)
-                    except Exception as e: pass
-
+                    except Exception as e:
+                        dlog(f"   ∟ [提醒] 匹配已有地址失败，准备新增: {e}")
+                        
                     if not address_filled_success:
                         try:
                             new_addr_btn = tb_page.locator('text=使用新地址').first
@@ -790,7 +881,7 @@ def run_pdd_to_taobao_task(stop_event):
                             address_context = tb_page
                             if tb_page.locator('text=使用新地址').is_visible(): dlog('   ∟ [警告] 新增地址弹窗可能未打开！')
 
-                        smart_box = address_context.locator('textarea[placeholder*=\"识别\"], textarea[placeholder*=\"粘贴\"], .smart-address-textarea').first
+                        smart_box = address_context.locator('textarea[placeholder*=\"识别\"], textarea[placeholder*=\"粘贴\"], textarea[placeholder*=\"智能\"], .smart-address-textarea').first
                         if smart_box.is_visible():
                             dlog("   ∟ [动作] 发现智能输入框，打入地址并触发解析...")
                             try:
@@ -824,13 +915,19 @@ def run_pdd_to_taobao_task(stop_event):
                                 for part in parts_to_click:
                                     if not part: continue
                                     try:
-                                        address_context.locator(f'li:has-text("{part}")').first.click(timeout=1500)
-                                        time.sleep(0.5)
+                    address_context.locator(f'li:has-text("{part}")').first.click(timeout=1500)
+                    address_context.locator(f'li:has-text("{part}")').first.click(timeout=1500)
+                    time.sleep(0.5)
+                    time.sleep(0.5)
                                     except:
-                                        short = re.sub(r'[省市县区自治区]', '', part)
-                                        if short and len(short) >= 2:
-                                            try: address_context.locator(f'li:has-text("{short}")').first.click(timeout=1500); time.sleep(0.5)
-                                            except: pass
+                    short = re.sub(r'[省市县区自治区]', '', part)
+                    short = re.sub(r'[省市县区自治区]', '', part)
+                    if short and len(short) >= 2:
+                    if short and len(short) >= 2:
+                        try: address_context.locator(f'li:has-text("{short}")').first.click(timeout=1500); time.sleep(0.5)
+                        try: address_context.locator(f'li:has-text("{short}")').first.click(timeout=1500); time.sleep(0.5)
+                        except: pass
+                        except: pass
                                 
                                 try: address_context.locator('li:has-text("暂不选择")').first.click(timeout=800); time.sleep(0.5)
                                 except: 
@@ -889,8 +986,10 @@ def run_pdd_to_taobao_task(stop_event):
                                 if address_context.locator('input#fullName').first.is_visible(timeout=1000):
                                     dlog("   ∟ [失败] ❌ 终极地址保存异常，表单被系统拦截卡住。")
                                     try:
-                                        err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
-                                        if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
+                    err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
+                    err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
+                    if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
+                    if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
                                     except: pass
                                 else: address_filled_success = True
                             else: address_filled_success = True
@@ -905,28 +1004,73 @@ def run_pdd_to_taobao_task(stop_event):
                         processed_sns.add(current_sn)
                         continue
 
-                    dlog("   ∟ [动作] 等待并校验最终地址 (防异步渲染)....")
-                    time.sleep(2.5) 
+                    # ========================================================================
+
+                    # 提交前双重确认地址
+                    # 提交前双重确认地址
+
+                    # ========================================================================
+                    # ========================================================================
+
+                    dlog("   ∟ [动作] 提交订单前，最后确认地址是否匹配...")
+                    dlog("   ∟ [动作] 提交订单前，最后确认地址是否匹配...")
+
                     try:
-                        checked_matched = False
-                        for _ in range(4):
-                            checked_matched = tb_page.evaluate(f'''(buyer) => {{
-                                let text = document.body.innerText.replace(/\\s+/g, '');
-                                let name = buyer.name.replace(/\\s+/g, '');
-                                let phoneLast4 = buyer.phone.substring(buyer.phone.length - 4);
-                                let phoneMasked = buyer.phone.substring(0,3) + "****" + phoneLast4;
-                                return text.includes(name) && (text.includes(phoneLast4) || text.includes(phoneMasked) || text.includes(buyer.phone));
-                            }}''', {'name': buyer_name, 'phone': buyer_phone})
-                            if checked_matched: break
-                            time.sleep(1.5)
-                            
+                    try:
+
+                        checked_matched = tb_page.evaluate(f'''(buyer) => {{
+                        checked_matched = tb_page.evaluate(f'''(buyer) => {{
+
+                            let name = buyer.name;
+                            let name = buyer.name;
+
+                            let phoneLast4 = buyer.phone.substring(buyer.phone.length - 4);
+                            let phoneLast4 = buyer.phone.substring(buyer.phone.length - 4);
+
+                            // 在“确认订单信息”之前的核心区域查找选中的地址
+                            // 在“确认订单信息”之前的核心区域查找选中的地址
+
+                            // 或者干脆全屏找有没有高亮的/当前显示的地址
+                            // 或者干脆全屏找有没有高亮的/当前显示的地址
+
+                            let text = document.body.innerText;
+                            let text = document.body.innerText;
+
+                            if (text.includes(name) && text.includes(phoneLast4)) return true;
+                            if (text.includes(name) && text.includes(phoneLast4)) return true;
+
+                            return false;
+                            return false;
+
+                        }}''', {'name': buyer_name, 'phone': buyer_phone})
+                        }}''', {'name': buyer_name, 'phone': buyer_phone})
+
+                        
+                        
+
                         if not checked_matched:
-                            dlog("   ∟ [严重失败] ❌ 多次探测仍未在最终页面找到买家信息！放弃提交。")
+                        if not checked_matched:
+
+                            dlog("   ∟ [严重失败] ❌ 最终准备提交的订单地址中，找不到目标买家姓名和手机号尾号！放弃提交。")
+                            dlog("   ∟ [严重失败] ❌ 最终准备提交的订单地址中，找不到目标买家姓名和手机号尾号！放弃提交。")
+
                             processed_sns.add(current_sn)
+                            processed_sns.add(current_sn)
+
                             continue
+                            continue
+
                         else:
+                        else:
+
                             dlog("   ∟ [成功] ✅ 地址最终匹配无误，继续提交。")
+                            dlog("   ∟ [成功] ✅ 地址最终匹配无误，继续提交。")
+
                     except: pass
+                    except: pass
+
+                    # ========================================================================
+                    # ========================================================================
 
                     # ================= V76.5 终极强杀：单次闭环判定 =================
                     dlog("   ∟ [动作] 检查是否需要勾选支付币种...")
@@ -951,8 +1095,10 @@ def run_pdd_to_taobao_task(stop_event):
                                 if not is_rmb_checked():
                                     dlog("   ∟ [动作] ⚠️ Playwright点击失效，启动JS强点！")
                                     rmb_option.evaluate('''node => {
-                                        let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
-                                        if (input && !input.checked) input.click();
+                    let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
+                    let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
+                    if (input && !input.checked) input.click();
+                    if (input && !input.checked) input.click();
                                     }''')
                                 time.sleep(3)
                                 
@@ -1082,66 +1228,125 @@ def run_pdd_to_taobao_task(stop_event):
                                     sn = popover.locator('.expressId--zegtKfpq').inner_text().strip()
                                     
                                     if comp and sn and not sn.startswith("6000"):
-                                        dlog(f"   ∟ [成功] 抓取到物流: {comp} {sn}")
-                                        pdd_page.bring_to_front()
-                                        
-                                        current_order_block = pdd_page.locator(f'tbody:has-text("{current_sn}")').last
-                                        ship_btn = current_order_block.locator('div[data-tracking-click-viewid="ele_single_order_ship_button"] button').last
-                                        
-                                        if ship_btn.count() > 0:
-                                            ship_btn.scroll_into_view_if_needed()
-                                            ship_btn.click(force=True)
-                                            dlog("   ∟ [动作] 已点击第一层【发货】")
-                                            time.sleep(2.5)
-                                            
-                                            pdd_page.fill('#trackingNumber input', sn)
-                                            pdd_page.locator('#shippingId input').click()
-                                            pdd_page.locator('#shippingId input').fill(comp[:2])
-                                            time.sleep(1)
-                                            pdd_page.keyboard.press("Enter")
-                                            time.sleep(1)
-                                            
-                                            pdd_page.locator('button[data-tracking-click-viewid="ele_confirm_shipment_shared"]').last.click(force=True)
-                                            dlog("   ∟ [动作] 已点击蓝色【确认发货】")
-                                            
-                                            dlog("   ∟ [监控] 启动 10 秒扫描，捕捉二次弹窗...")
-                                            kill_success = False
-                                            for i in range(10):
-                                                time.sleep(1)
-                                                result = pdd_page.evaluate('''() => {
-                                                    let attrBtns = document.querySelectorAll('button[data-tracking-click-viewid="makesure"]');
-                                                    if (attrBtns.length > 0) {
-                                                        attrBtns[attrBtns.length - 1].click();
-                                                        return 'ATTR';
-                                                    }
-                                                    let allBtns = Array.from(document.querySelectorAll('button'));
-                                                    for (let j = allBtns.length - 1; j >= 0; j--) {
-                                                        if (allBtns[j].innerText && allBtns[j].innerText.includes('继续发货')) {
-                                                            allBtns[j].click();
-                                                            return 'TEXT';
-                                                        }
-                                                    }
-                                                    return 'NONE';
-                                                }''')
-                                                
-                                                if result != 'NONE':
-                                                    dlog(f"   ∟ [突破] 💥 弹窗击杀成功 (触发模式: {result})！耗时 {i+1} 秒。")
-                                                    kill_success = True
-                                                    break
-                                                    
-                                            if not kill_success:
-                                                dlog("   ∟ [状态] 10 秒内未检测到弹窗。")
-                                            
-                                            dlog(f"   ∟ [完成] 订单物流回填完毕。")
-                                            processed_sns.add(current_sn)
-                                            stats["logistics_updated"] += 1
-                                            time.sleep(2)
-                                        else: 
-                                            dlog("   ∟ [跳过] 找不到拼多多的发货按钮。")
-                                            already_checked_logistics.add(tb_id)
+                    dlog(f"   ∟ [成功] 抓取到物流: {comp} {sn}")
+                    dlog(f"   ∟ [成功] 抓取到物流: {comp} {sn}")
+                    pdd_page.bring_to_front()
+                    pdd_page.bring_to_front()
+                    
+                    
+                    current_order_block = pdd_page.locator(f'tbody:has-text("{current_sn}")').last
+                    current_order_block = pdd_page.locator(f'tbody:has-text("{current_sn}")').last
+                    ship_btn = current_order_block.locator('div[data-tracking-click-viewid="ele_single_order_ship_button"] button').last
+                    ship_btn = current_order_block.locator('div[data-tracking-click-viewid="ele_single_order_ship_button"] button').last
+                    
+                    
+                    if ship_btn.count() > 0:
+                    if ship_btn.count() > 0:
+                        ship_btn.scroll_into_view_if_needed()
+                        ship_btn.scroll_into_view_if_needed()
+                        ship_btn.click(force=True)
+                        ship_btn.click(force=True)
+                        dlog("   ∟ [动作] 已点击第一层【发货】")
+                        dlog("   ∟ [动作] 已点击第一层【发货】")
+                        time.sleep(2.5)
+                        time.sleep(2.5)
+                        
+                        
+                        pdd_page.fill('#trackingNumber input', sn)
+                        pdd_page.fill('#trackingNumber input', sn)
+                        pdd_page.locator('#shippingId input').click()
+                        pdd_page.locator('#shippingId input').click()
+                        pdd_page.locator('#shippingId input').fill(comp[:2])
+                        pdd_page.locator('#shippingId input').fill(comp[:2])
+                        time.sleep(1)
+                        time.sleep(1)
+                        pdd_page.keyboard.press("Enter")
+                        pdd_page.keyboard.press("Enter")
+                        time.sleep(1)
+                        time.sleep(1)
+                        
+                        
+                        pdd_page.locator('button[data-tracking-click-viewid="ele_confirm_shipment_shared"]').last.click(force=True)
+                        pdd_page.locator('button[data-tracking-click-viewid="ele_confirm_shipment_shared"]').last.click(force=True)
+                        dlog("   ∟ [动作] 已点击蓝色【确认发货】")
+                        dlog("   ∟ [动作] 已点击蓝色【确认发货】")
+                        
+                        
+                        dlog("   ∟ [监控] 启动 10 秒扫描，捕捉二次弹窗...")
+                        dlog("   ∟ [监控] 启动 10 秒扫描，捕捉二次弹窗...")
+                        kill_success = False
+                        kill_success = False
+                        for i in range(10):
+                        for i in range(10):
+                            time.sleep(1)
+                            time.sleep(1)
+                            result = pdd_page.evaluate('''() => {
+                            result = pdd_page.evaluate('''() => {
+                                let attrBtns = document.querySelectorAll('button[data-tracking-click-viewid="makesure"]');
+                                let attrBtns = document.querySelectorAll('button[data-tracking-click-viewid="makesure"]');
+                                if (attrBtns.length > 0) {
+                                if (attrBtns.length > 0) {
+                                    attrBtns[attrBtns.length - 1].click();
+                                    attrBtns[attrBtns.length - 1].click();
+                                    return 'ATTR';
+                                    return 'ATTR';
+                                }
+                                }
+                                let allBtns = Array.from(document.querySelectorAll('button'));
+                                let allBtns = Array.from(document.querySelectorAll('button'));
+                                for (let j = allBtns.length - 1; j >= 0; j--) {
+                                for (let j = allBtns.length - 1; j >= 0; j--) {
+                                    if (allBtns[j].innerText && allBtns[j].innerText.includes('继续发货')) {
+                                    if (allBtns[j].innerText && allBtns[j].innerText.includes('继续发货')) {
+                                        allBtns[j].click();
+                                        allBtns[j].click();
+                                        return 'TEXT';
+                                        return 'TEXT';
+                                    }
+                                    }
+                                }
+                                }
+                                return 'NONE';
+                                return 'NONE';
+                            }''')
+                            }''')
+                            
+                            
+                            if result != 'NONE':
+                            if result != 'NONE':
+                                dlog(f"   ∟ [突破] 💥 弹窗击杀成功 (触发模式: {result})！耗时 {i+1} 秒。")
+                                dlog(f"   ∟ [突破] 💥 弹窗击杀成功 (触发模式: {result})！耗时 {i+1} 秒。")
+                                kill_success = True
+                                kill_success = True
+                                break
+                                break
+                                
+                                
+                        if not kill_success:
+                        if not kill_success:
+                            dlog("   ∟ [状态] 10 秒内未检测到弹窗。")
+                            dlog("   ∟ [状态] 10 秒内未检测到弹窗。")
+                        
+                        
+                        dlog(f"   ∟ [完成] 订单物流回填完毕。")
+                        dlog(f"   ∟ [完成] 订单物流回填完毕。")
+                        processed_sns.add(current_sn)
+                        processed_sns.add(current_sn)
+                        stats["logistics_updated"] += 1
+                        stats["logistics_updated"] += 1
+                        time.sleep(2)
+                        time.sleep(2)
+                    else: 
+                    else: 
+                        dlog("   ∟ [跳过] 找不到拼多多的发货按钮。")
+                        dlog("   ∟ [跳过] 找不到拼多多的发货按钮。")
+                        already_checked_logistics.add(tb_id)
+                        already_checked_logistics.add(tb_id)
                                     else: 
-                                        dlog("   ∟ [跳过] 物流信息提取异常(或为虚拟单号)。")
-                                        already_checked_logistics.add(tb_id)
+                    dlog("   ∟ [跳过] 物流信息提取异常(或为虚拟单号)。")
+                    dlog("   ∟ [跳过] 物流信息提取异常(或为虚拟单号)。")
+                    already_checked_logistics.add(tb_id)
+                    already_checked_logistics.add(tb_id)
                                 else: 
                                     dlog("   ∟ [跳过] 淘宝物流弹窗未能正确显示。")
                                     already_checked_logistics.add(tb_id)
