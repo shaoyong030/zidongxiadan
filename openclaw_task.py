@@ -383,28 +383,29 @@ def run_pdd_to_taobao_task(stop_event):
                     address_filled_success = False 
                     try:
                         new_addr_btn = tb_page.locator('text=使用新地址').first
-                        if new_addr_btn.is_visible(timeout=8000):
-                            new_addr_btn.click(force=True); time.sleep(2)
+                        if new_addr_btn.is_visible(timeout=5000):
+                            new_addr_btn.click(force=True, timeout=2000); time.sleep(2)
                     except: pass
 
                     try:
                         address_context = tb_page.frame_locator('iframe').last
                         try:
-                            address_context.locator('textarea, input#fullName').first.wait_for(timeout=5000)
+                            address_context.locator('textarea, input#fullName, input[placeholder*=\"25个字符\"]').first.wait_for(timeout=10000)
                         except:
                             address_context = tb_page
 
-                        smart_box = address_context.locator('textarea').first
+                        smart_box = address_context.locator('textarea:not([placeholder*=\"详细地址\"])').first
                         if smart_box.is_visible():
                             dlog("   ∟ [动作] 发现智能输入框，打入地址并触发解析...")
-                            smart_box.focus()
-                            smart_box.fill(f"{buyer_name} {buyer_phone} {buyer_address}")
-                            time.sleep(0.5)
-                            tb_page.keyboard.press("Space")
-                            time.sleep(1.5)
-                            
-                            try: 
-                                address_context.locator('button:has-text("填入"), button:has-text("解析")').first.click(timeout=1000)
+                            try:
+                                smart_box.click(timeout=2000)
+                                time.sleep(0.1)
+                                smart_box.fill("", timeout=1500)
+                                smart_box.type(f"{buyer_name} {buyer_phone} {buyer_address}", delay=20, timeout=4000)
+                                time.sleep(0.5)
+                                tb_page.keyboard.press("Space")
+                                time.sleep(1.5)
+                                address_context.locator('button:has-text("填入"), button:has-text("解析")').first.click(timeout=2000)
                                 time.sleep(1.5)
                             except: pass
 
@@ -414,7 +415,10 @@ def run_pdd_to_taobao_task(stop_event):
                         if "请选择" in region_text or not region_text.strip():
                             dlog("   ∟ [警告] 地区未全选，启动 JS 强行下拉补全...")
                             try:
-                                address_context.locator('.cndzk-entrance-division-header-click, .ant-select-selector').first.click(force=True)
+                                try:
+                                    address_context.locator('.cndzk-entrance-division-header-click, .ant-select-selector, input[placeholder*=\"省/市/区\"], span[title*=\"省/市/区\"], .next-select').first.click(force=True, timeout=8000)
+                                except:
+                                    address_context.locator('.cndzk-entrance-division-header-click, .ant-select-selector, input[placeholder*=\"省/市/区\"], span[title*=\"省/市/区\"], .next-select').first.evaluate("node => node.click()", timeout=2000)
                                 time.sleep(1)
                                 
                                 region_match = re.match(r'^(.*?省|.*?自治区|上海市?|北京市?|天津市?|重庆市?)(.*?市|.*?自治州|.*?地区|.*?盟)?(.*?区|.*?县|.*?市|.*?旗)?', buyer_address.replace(' ', ''))
@@ -439,37 +443,59 @@ def run_pdd_to_taobao_task(stop_event):
                             except Exception as e:
                                 dlog(f"   ∟ [报错] 下拉框补全失败: {e}")
 
-                        address_context.locator('input#fullName, input[placeholder*="姓名"]').first.fill(buyer_name)
-                        address_context.locator('input#mobile, input[placeholder*="手机"]').first.fill(buyer_phone)
+                        try:
+                            # 强化React防吞字补录
+                            name_input = address_context.locator('input#fullName, input[placeholder*=\"姓名\"], input[placeholder*=\"25个字\"], input[placeholder*=\"长度不超过\"]').first
+                            name_input.click(timeout=8000)
+                            name_input.fill("", timeout=1500)
+                            name_input.type(buyer_name, delay=20, timeout=3000)
+                        except Exception as e:
+                            dlog(f"   ∟ [报错] 姓名输入超时: {e}")
+                            
+                        try:
+                            phone_input = address_context.locator('input#mobile, input[placeholder*=\"手机\"], input[placeholder*=\"必须填一项\"]').first
+                            phone_input.click(timeout=8000)
+                            phone_input.fill("", timeout=1500)
+                            phone_input.type(buyer_phone, delay=20, timeout=3000)
+                        except: pass
                         
                         detail_addr = buyer_address
                         region_match = re.match(r'^(.*?省|.*?自治区|上海市?|北京市?|天津市?|重庆市?)(.*?市|.*?自治州|.*?地区|.*?盟)?(.*?区|.*?县|.*?市|.*?旗)?(.*)$', buyer_address.replace(' ', ''))
                         if region_match and region_match.group(4):
                             detail_addr = region_match.group(4)
                         try:
-                            address_context.locator('textarea#addressDetail, textarea[placeholder*="详细地址"]').first.fill(detail_addr)
+                            addr_input = address_context.locator('textarea#addressDetail, textarea[placeholder*="详细地址"]').first
+                            addr_input.click(timeout=8000)
+                            addr_input.fill("", timeout=1500)
+                            addr_input.type(detail_addr, delay=20, timeout=3000)
                         except: pass
                         time.sleep(1)
 
                         dlog("   ∟ [动作] 点击保存地址...")
                         save_btn = address_context.locator('button.next-btn-primary:has-text("保存"), button:has-text("保存")').first
-                        try: save_btn.click(force=True)
-                        except: save_btn.evaluate("node => node.click()")
+                        try: save_btn.click(force=True, timeout=4000)
+                        except: 
+                            try: save_btn.evaluate("node => node.click()", timeout=2000)
+                            except: pass
                         time.sleep(2) 
                         
                         try:
                             confirm_btn = address_context.locator('button:has-text("确认"), button:has-text("确定")').first
-                            if confirm_btn.is_visible():
+                            if confirm_btn.is_visible(timeout=1500):
                                 dlog("   ∟ [动作] 出现地址纠错弹窗，点击确认！")
-                                confirm_btn.click(force=True)
+                                confirm_btn.click(force=True, timeout=2000)
                                 time.sleep(2)
                         except: pass
                         
                         try:
-                            if address_context.locator('input#fullName').first.is_visible():
-                                time.sleep(2)
-                                if address_context.locator('input#fullName').first.is_visible():
+                            if address_context.locator('input#fullName').first.is_visible(timeout=2000):
+                                time.sleep(1.5)
+                                if address_context.locator('input#fullName').first.is_visible(timeout=1000):
                                     dlog("   ∟ [失败] ❌ 终极地址保存异常，表单被系统拦截卡住。")
+                                    try:
+                                        err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
+                                        if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
+                                    except: pass
                                 else: address_filled_success = True
                             else: address_filled_success = True
                         except:
@@ -509,10 +535,11 @@ def run_pdd_to_taobao_task(stop_event):
                                         let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
                                         if (input && !input.checked) input.click();
                                     }''')
-                                time.sleep(1)
+                                time.sleep(3)
                                 
                             if is_rmb_checked():
                                 dlog("   ∟ [状态] ✅ 【人民币】勾选成功。")
+                                time.sleep(3)
                             else:
                                 dlog("   ∟ [状态] ❌ 【人民币】未能勾选。")
                         else:
@@ -689,28 +716,29 @@ def run_pdd_to_taobao_task(stop_event):
                     address_filled_success = False 
                     try:
                         new_addr_btn = tb_page.locator('text=使用新地址').first
-                        if new_addr_btn.is_visible(timeout=8000):
-                            new_addr_btn.click(force=True); time.sleep(2)
+                        if new_addr_btn.is_visible(timeout=5000):
+                            new_addr_btn.click(force=True, timeout=2000); time.sleep(2)
                     except: pass
 
                     try:
                         address_context = tb_page.frame_locator('iframe').last
                         try:
-                            address_context.locator('textarea, input#fullName').first.wait_for(timeout=5000)
+                            address_context.locator('textarea, input#fullName, input[placeholder*=\"25个字符\"]').first.wait_for(timeout=10000)
                         except:
                             address_context = tb_page
 
-                        smart_box = address_context.locator('textarea').first
+                        smart_box = address_context.locator('textarea:not([placeholder*=\"详细地址\"])').first
                         if smart_box.is_visible():
                             dlog("   ∟ [动作] 发现智能输入框，打入地址并触发解析...")
-                            smart_box.focus()
-                            smart_box.fill(f"{buyer_name} {buyer_phone} {buyer_address}")
-                            time.sleep(0.5)
-                            tb_page.keyboard.press("Space")
-                            time.sleep(1.5)
-                            
-                            try: 
-                                address_context.locator('button:has-text("填入"), button:has-text("解析")').first.click(timeout=1000)
+                            try:
+                                smart_box.click(timeout=2000)
+                                time.sleep(0.1)
+                                smart_box.fill("", timeout=1500)
+                                smart_box.type(f"{buyer_name} {buyer_phone} {buyer_address}", delay=20, timeout=4000)
+                                time.sleep(0.5)
+                                tb_page.keyboard.press("Space")
+                                time.sleep(1.5)
+                                address_context.locator('button:has-text("填入"), button:has-text("解析")').first.click(timeout=2000)
                                 time.sleep(1.5)
                             except: pass
 
@@ -720,7 +748,10 @@ def run_pdd_to_taobao_task(stop_event):
                         if "请选择" in region_text or not region_text.strip():
                             dlog("   ∟ [警告] 地区未全选，启动 JS 强行下拉补全...")
                             try:
-                                address_context.locator('.cndzk-entrance-division-header-click, .ant-select-selector').first.click(force=True)
+                                try:
+                                    address_context.locator('.cndzk-entrance-division-header-click, .ant-select-selector, input[placeholder*=\"省/市/区\"], span[title*=\"省/市/区\"], .next-select').first.click(force=True, timeout=8000)
+                                except:
+                                    address_context.locator('.cndzk-entrance-division-header-click, .ant-select-selector, input[placeholder*=\"省/市/区\"], span[title*=\"省/市/区\"], .next-select').first.evaluate("node => node.click()", timeout=2000)
                                 time.sleep(1)
                                 
                                 region_match = re.match(r'^(.*?省|.*?自治区|上海市?|北京市?|天津市?|重庆市?)(.*?市|.*?自治州|.*?地区|.*?盟)?(.*?区|.*?县|.*?市|.*?旗)?', buyer_address.replace(' ', ''))
@@ -745,37 +776,59 @@ def run_pdd_to_taobao_task(stop_event):
                             except Exception as e:
                                 dlog(f"   ∟ [报错] 下拉框补全失败: {e}")
 
-                        address_context.locator('input#fullName, input[placeholder*="姓名"]').first.fill(buyer_name)
-                        address_context.locator('input#mobile, input[placeholder*="手机"]').first.fill(buyer_phone)
+                        try:
+                            # 强化React防吞字补录
+                            name_input = address_context.locator('input#fullName, input[placeholder*=\"姓名\"], input[placeholder*=\"25个字\"], input[placeholder*=\"长度不超过\"]').first
+                            name_input.click(timeout=8000)
+                            name_input.fill("", timeout=1500)
+                            name_input.type(buyer_name, delay=20, timeout=3000)
+                        except Exception as e:
+                            dlog(f"   ∟ [报错] 姓名输入超时: {e}")
+                            
+                        try:
+                            phone_input = address_context.locator('input#mobile, input[placeholder*=\"手机\"], input[placeholder*=\"必须填一项\"]').first
+                            phone_input.click(timeout=8000)
+                            phone_input.fill("", timeout=1500)
+                            phone_input.type(buyer_phone, delay=20, timeout=3000)
+                        except: pass
                         
                         detail_addr = buyer_address
                         region_match = re.match(r'^(.*?省|.*?自治区|上海市?|北京市?|天津市?|重庆市?)(.*?市|.*?自治州|.*?地区|.*?盟)?(.*?区|.*?县|.*?市|.*?旗)?(.*)$', buyer_address.replace(' ', ''))
                         if region_match and region_match.group(4):
                             detail_addr = region_match.group(4)
                         try:
-                            address_context.locator('textarea#addressDetail, textarea[placeholder*="详细地址"]').first.fill(detail_addr)
+                            addr_input = address_context.locator('textarea#addressDetail, textarea[placeholder*="详细地址"]').first
+                            addr_input.click(timeout=8000)
+                            addr_input.fill("", timeout=1500)
+                            addr_input.type(detail_addr, delay=20, timeout=3000)
                         except: pass
                         time.sleep(1)
 
                         dlog("   ∟ [动作] 点击保存地址...")
                         save_btn = address_context.locator('button.next-btn-primary:has-text("保存"), button:has-text("保存")').first
-                        try: save_btn.click(force=True)
-                        except: save_btn.evaluate("node => node.click()")
+                        try: save_btn.click(force=True, timeout=4000)
+                        except: 
+                            try: save_btn.evaluate("node => node.click()", timeout=2000)
+                            except: pass
                         time.sleep(2) 
                         
                         try:
                             confirm_btn = address_context.locator('button:has-text("确认"), button:has-text("确定")').first
-                            if confirm_btn.is_visible():
+                            if confirm_btn.is_visible(timeout=1500):
                                 dlog("   ∟ [动作] 出现地址纠错弹窗，点击确认！")
-                                confirm_btn.click(force=True)
+                                confirm_btn.click(force=True, timeout=2000)
                                 time.sleep(2)
                         except: pass
                         
                         try:
-                            if address_context.locator('input#fullName').first.is_visible():
-                                time.sleep(2)
-                                if address_context.locator('input#fullName').first.is_visible():
+                            if address_context.locator('input#fullName').first.is_visible(timeout=2000):
+                                time.sleep(1.5)
+                                if address_context.locator('input#fullName').first.is_visible(timeout=1000):
                                     dlog("   ∟ [失败] ❌ 终极地址保存异常，表单被系统拦截卡住。")
+                                    try:
+                                        err_text = address_context.locator('.next-form-item-help, .error-msg, .cndzk-entrance-division-error').first.inner_text(timeout=1000)
+                                        if err_text: dlog(f"   ∟ [拦截详情] {err_text}")
+                                    except: pass
                                 else: address_filled_success = True
                             else: address_filled_success = True
                         except:
@@ -815,10 +868,11 @@ def run_pdd_to_taobao_task(stop_event):
                                         let input = node.querySelector('input[type="checkbox"], input[type="radio"]');
                                         if (input && !input.checked) input.click();
                                     }''')
-                                time.sleep(1)
+                                time.sleep(3)
                                 
                             if is_rmb_checked():
                                 dlog("   ∟ [状态] ✅ 【人民币】勾选成功。")
+                                time.sleep(3)
                             else:
                                 dlog("   ∟ [状态] ❌ 【人民币】未能勾选。")
                         else:
