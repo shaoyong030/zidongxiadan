@@ -51,6 +51,31 @@ def send_long_message(chat_id, text):
         send_message(chat_id, part)
         time.sleep(0.5)
 
+def trigger_ai_fix(chat_id, text):
+    send_message(chat_id, "🔧 嗅探到失败/崩溃异常！已全自动提交给后台 AI(我本人) 尝试接管修复中，请稍等...")
+    def _run_fix():
+        paths = ["/api/chat", "/chat", "/api/v1/chat", "/message"]
+        for path in paths:
+            try:
+                payload = {
+                    "message": text, 
+                    "query": text,
+                    "session_id": "main",
+                    "agent_id": "main"
+                }
+                # AI修复可能需要挺长时间，给个180秒超时
+                res = requests.post(f"{OPENCLAW_BASE}{path}", json=payload, timeout=180)
+                if res.status_code == 200:
+                    data = res.json()
+                    ans = data.get("response") or data.get("data", {}).get("content") or data.get("text")
+                    if ans:
+                        send_message(chat_id, f"🛠️ **AI 自动自我修复报告** 🛠️：\n{ans}")
+                        return
+            except Exception as e:
+                dlog(f"[AI修复请求] 访问 {path} 失败: {e}")
+    # 使用新线程去让AI修复，不阻塞主线程
+    threading.Thread(target=_run_fix, daemon=True).start()
+
 def task_wrapper(chat_id):
     global task_thread
     try:
@@ -58,8 +83,18 @@ def task_wrapper(chat_id):
         detailed_log, final_report = run_pdd_to_taobao_task(stop_event)
         if detailed_log: send_long_message(chat_id, detailed_log)
         if final_report: send_message(chat_id, final_report)
+        
+        # 嗅探失败特征
+        if detailed_log and ("❌" in detailed_log or "报错" in detailed_log or "崩溃" in detailed_log or "严重失败" in detailed_log):
+            # 取最后面的一段日志（最靠近死点的地方）
+            bug_context = detailed_log[-1200:]
+            ai_prompt = f"【系统自动求助】你好，我是你的自动打单外围巡航系统。刚才的下单任务中出现了异常或失败！请根据这份最新的现场错误日志，自主分析并修改代码修复它（特别是防封、选址、或匹配模块）。日志片段如下：\n{bug_context}"
+            trigger_ai_fix(chat_id, ai_prompt)
+            
     except Exception as e:
-        send_message(chat_id, f"⚠️ 系统错误: {e}")
+        send_message(chat_id, f"⚠️ 系统严重崩溃: {e}")
+        ai_prompt = f"【系统自动求助】你好，我是你的自动打单巡航系统。脚本发生了不可预期的运行时异常闪退！报错信息为: {e}。请自主修改代码修复它。"
+        trigger_ai_fix(chat_id, ai_prompt)
     finally:
         task_thread = None
 
