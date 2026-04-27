@@ -4,7 +4,9 @@ import time
 import re
 import pyperclip
 import os 
-import datetime  
+import datetime
+import json
+import traceback
 
 def run_pdd_to_taobao_task(stop_event):
     log_buffer = []
@@ -17,6 +19,25 @@ def run_pdd_to_taobao_task(stop_event):
             out = f"[{t_str}] {msg}"
         print(out)
         log_buffer.append(out)
+
+    ERROR_REPORT_PATH = '/Users/shaoyong/Desktop/zidongxiadan/latest_error.json'
+
+    def save_error_report(error_msg, action_phase="unknown", extra_context=""):
+        """保存结构化错误报告，供 Gemini 自修复守护进程消费"""
+        try:
+            report = {
+                "timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "error": str(error_msg),
+                "traceback": traceback.format_exc() if traceback.format_exc().strip() != "NoneType: None" else "",
+                "action_phase": action_phase,
+                "extra_context": extra_context,
+                "recent_log": "\n".join(log_buffer[-30:]),
+            }
+            with open(ERROR_REPORT_PATH, 'w', encoding='utf-8') as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+            dlog(f"   ∟ [错误报告] 已保存至 latest_error.json，等待自动修复守护进程处理。")
+        except Exception as save_err:
+            dlog(f"   ∟ [警告] 错误报告保存失败: {save_err}")
 
     dlog("\n" + "="*50)
     dlog("🎬 [系统启动] 全链路闭环 V76.3 (防React吞字强化回填版)")
@@ -133,7 +154,7 @@ def run_pdd_to_taobao_task(stop_event):
                     match = re.search(r'([A-Za-z0-9\u4e00-\u9fa5_]+\*\*\*)', txt)
                     if match: current_buyer = match.group(1)
 
-                if "绿色" in txt and "待发货" in txt and sn not in seen_green_sns:
+                if "绿色" in txt and sn not in seen_green_sns:
                     seen_green_sns.add(sn); stats["already_green"] += 1
                 elif "合并" in txt and sn not in seen_merged_sns:
                     seen_merged_sns.add(sn); stats["already_merged"] += 1
@@ -142,10 +163,11 @@ def run_pdd_to_taobao_task(stop_event):
 
                 dlog(f"  👉 [判定] 分析订单: {sn} | 买家: {current_buyer}")
 
-                if "绿色" in txt and "待发货" in txt:
-                    tb_match = re.search(r'27\d{17}', txt)
+                if "绿色" in txt:
+                    # 匹配淘宝单号：19位纯数字，排除拼多多单号格式(含-)和商品ID
+                    tb_match = re.search(r'(?<![-\d])([2-9]\d{18})(?![-\d])', txt)
                     if tb_match:
-                        tid = tb_match.group()
+                        tid = tb_match.group(1)
                         if tid not in already_checked_logistics:
                             dlog(f"     ∟ 命中[逻辑1]: 标绿待查物流 ({tid})")
                             action, tb_id, current_sn = "LOGISTICS", tid, sn; break
@@ -584,6 +606,7 @@ def run_pdd_to_taobao_task(stop_event):
 
                         except Exception as e:
                             dlog(f"   ∟ [报错] 地址模块严重崩溃: {e}")
+                            save_error_report(e, "MERGE_ADDRESS", f"买家:{buyer_name} 地址:{buyer_address[:30]}")
                             processed_sns.add(current_sn)
 
                     if not address_filled_success:
@@ -733,7 +756,9 @@ def run_pdd_to_taobao_task(stop_event):
                     processed_sns.add(current_sn); stats["newly_placed"] += 1
                     del merge_success_map[current_sn] 
                 except Exception as e:
-                    dlog(f"   ∟ [报错] 合单子订单回填异常: {e}"); processed_sns.add(current_sn)
+                    dlog(f"   ∟ [报错] 合单子订单回填异常: {e}")
+                    save_error_report(e, "MARK_GREEN_MERGED", f"订单:{current_sn}")
+                    processed_sns.add(current_sn)
                 continue
 
 
@@ -1016,6 +1041,7 @@ def run_pdd_to_taobao_task(stop_event):
 
                         except Exception as e:
                             dlog(f"   ∟ [报错] 地址模块严重崩溃: {e}")
+                            save_error_report(e, "PLACE_ORDER_ADDRESS", f"买家:{buyer_name} 地址:{buyer_address[:30]}")
                             processed_sns.add(current_sn)
 
                     if not address_filled_success:
@@ -1156,7 +1182,9 @@ def run_pdd_to_taobao_task(stop_event):
                         except Exception as e:
                             dlog(f"   ∟ [报错] 回填备注异常: {e}"); processed_sns.add(current_sn)
                 except Exception as e:
-                    dlog(f"   ∟ [报错] 自动下单崩溃: {e}"); processed_sns.add(current_sn)
+                    dlog(f"   ∟ [报错] 自动下单崩溃: {e}")
+                    save_error_report(e, "PLACE_ORDER", f"订单:{current_sn}")
+                    processed_sns.add(current_sn)
 
             # ==========================================
             # 执行区 2：物流回填
@@ -1250,6 +1278,7 @@ def run_pdd_to_taobao_task(stop_event):
                                 already_checked_logistics.add(tb_id)
                         except Exception as e: 
                             dlog(f"   ∟ [报错] 查询物流过程出错: {e}")
+                            save_error_report(e, "LOGISTICS", f"淘宝单号:{tb_id} PDD单号:{current_sn}")
                             already_checked_logistics.add(tb_id)
                     else: 
                         dlog(f"   ∟ [跳过] 淘宝该订单当前状态为: 【{status_text}】，暂未发货。")

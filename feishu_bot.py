@@ -7,9 +7,7 @@ from openclaw_task import run_pdd_to_taobao_task
 # ================= 配置区 =================
 TOKEN = "8709491629:AAGbFv7KIEGDa6owztxjPOdFfDP0N69nD0g"
 PROXIES = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
-SCHEDULE_INTERVAL = 3600  
-# 🚀 这里的接口会根据下面尝试的结果自动修正
-OPENCLAW_BASE = "http://127.0.0.1:18789" 
+SCHEDULE_INTERVAL = 3600
 
 # 🚀 硬编码你的专属 Chat ID
 ADMIN_CHAT_ID = "8693156373"
@@ -52,28 +50,19 @@ def send_long_message(chat_id, text):
         time.sleep(0.5)
 
 def trigger_ai_fix(chat_id, text):
-    send_message(chat_id, "🔧 嗅探到失败/崩溃异常！已全自动提交给后台 AI(我本人) 尝试接管修复中，请稍等...")
+    """使用 Gemini API 自动分析并修复错误"""
+    send_message(chat_id, "🔧 嗅探到异常！正在调用 Gemini AI 自动分析修复...")
     def _run_fix():
-        paths = ["/api/chat", "/chat", "/api/v1/chat", "/message"]
-        for path in paths:
-            try:
-                payload = {
-                    "message": text, 
-                    "query": text,
-                    "session_id": "main",
-                    "agent_id": "main"
-                }
-                # AI修复可能需要挺长时间，给个180秒超时
-                res = requests.post(f"{OPENCLAW_BASE}{path}", json=payload, timeout=180)
-                if res.status_code == 200:
-                    data = res.json()
-                    ans = data.get("response") or data.get("data", {}).get("content") or data.get("text")
-                    if ans:
-                        send_message(chat_id, f"🛠️ **AI 自动自我修复报告** 🛠️：\n{ans}")
-                        return
-            except Exception as e:
-                dlog(f"[AI修复请求] 访问 {path} 失败: {e}")
-    # 使用新线程去让AI修复，不阻塞主线程
+        try:
+            from auto_fixer import run_fix_cycle
+            fixed = run_fix_cycle()
+            if fixed:
+                send_message(chat_id, "✅ [Gemini 自修复] 补丁已应用并重启，请留意后续运行。")
+            else:
+                send_message(chat_id, "🔍 [Gemini 分析] 已完成分析，详情已发送。无可执行补丁或无新错误。")
+        except Exception as e:
+            dlog(f"[Gemini修复] 执行异常: {e}")
+            send_message(chat_id, f"⚠️ Gemini 自修复模块异常: {e}")
     threading.Thread(target=_run_fix, daemon=True).start()
 
 def task_wrapper(chat_id):
@@ -119,6 +108,17 @@ def auto_scheduler():
         # 每次巡检结束后，再等待设定的间隔时间（1小时）
         time.sleep(SCHEDULE_INTERVAL)
 
+def auto_fixer_scheduler():
+    """Gemini 自修复守护线程：每 10 分钟巡检错误报告"""
+    time.sleep(30)  # 启动延迟，等系统稳定
+    while True:
+        try:
+            from auto_fixer import run_fix_cycle
+            run_fix_cycle()
+        except Exception as e:
+            dlog(f"[自修复守护] 异常: {e}")
+        time.sleep(600)  # 10分钟一次
+
 def start_bot():
     global task_thread
     print("\n" + "*"*50)
@@ -133,6 +133,8 @@ def start_bot():
         dlog(f"⚠️ 启动通知发送失败 (网络波动)，但系统将继续运行: {e}")
     
     threading.Thread(target=auto_scheduler, daemon=True).start()
+    threading.Thread(target=auto_fixer_scheduler, daemon=True).start()
+    dlog("🔧 [系统] Gemini 自修复守护线程已启动（10分钟巡检）")
     
     offset = None
     while True:
@@ -146,7 +148,12 @@ def start_bot():
                 
                 if not chat_id: continue
 
-                if text == "1":
+                HELP_TEXT = "📌 可用指令：\n0 - 查看指令列表\n1 - 启动下单\n2 - 停止\n3/修复 - 手动触发Gemini修复\n4/状态 - 查看修复工具状态\n日志/log - 查看修复历史"
+
+                if text == "0":
+                    send_message(chat_id, HELP_TEXT)
+
+                elif text == "1":
                     if task_thread and task_thread.is_alive(): send_message(chat_id, "⚠️ 运行中...")
                     else:
                         send_message(chat_id, "🚀 启动代发...")
@@ -156,39 +163,67 @@ def start_bot():
                 elif text == "2":
                     if task_thread and task_thread.is_alive(): stop_event.set()
 
-                elif "截图" in text:
-                    os.system("screencapture -x /tmp/screen.png")
-                    send_photo(chat_id, "/tmp/screen.png")
+                elif text == "3" or text == "修复":
+                    send_message(chat_id, "🔧 手动触发 Gemini 自修复检查...")
+                    trigger_ai_fix(chat_id, text)
+
+                elif text == "4" or text == "状态":
+                    try:
+                        import json as _json
+                        lines = []
+                        # 1. 错误文件状态
+                        err_path = "/Users/shaoyong/Desktop/zidongxiadan/latest_error.json"
+                        if os.path.exists(err_path):
+                            with open(err_path, 'r') as f:
+                                err = _json.load(f)
+                            status = "✅ 已处理" if err.get("processed") else "🔴 待修复"
+                            lines.append(f"错误报告: {status} ({err.get('timestamp','未知')})")
+                            if not err.get("processed"):
+                                lines.append(f"  阶段: {err.get('action_phase','?')}")
+                                lines.append(f"  错误: {str(err.get('error','?'))[:80]}")
+                        else:
+                            lines.append("错误报告: 📭 无")
+                        # 2. 修复历史
+                        log_path = "/Users/shaoyong/Desktop/zidongxiadan/fix_history.log"
+                        if os.path.exists(log_path):
+                            with open(log_path, 'r') as f:
+                                count = sum(1 for _ in f)
+                            lines.append(f"修复历史: 共 {count} 条记录")
+                        else:
+                            lines.append("修复历史: 暂无")
+                        # 3. Gemini API
+                        try:
+                            import requests as _req
+                            r = _req.get("https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyCpWi6fnXNW_AKcpVbZz-EwP92dhW1EKEQ", timeout=5)
+                            lines.append(f"Gemini API: {'✅ 正常' if r.status_code == 200 else '❌ 异常 '+str(r.status_code)}")
+                        except Exception as ge:
+                            lines.append(f"Gemini API: ❌ 不可达 ({ge})")
+                        # 4. PM2
+                        import subprocess
+                        pm2 = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=5)
+                        if pm2.returncode == 0:
+                            procs = _json.loads(pm2.stdout)
+                            for p in procs:
+                                if "下单" in p.get("name", ""):
+                                    lines.append(f"PM2 进程: {p['pm2_env']['status']} (重启{p['pm2_env']['restart_time']}次)")
+                        send_message(chat_id, "📊 修复工具状态:\n" + "\n".join(lines))
+                    except Exception as e:
+                        send_message(chat_id, f"状态检查异常: {e}")
+
+                elif text == "日志" or text == "log":
+                    try:
+                        log_path = "/Users/shaoyong/Desktop/zidongxiadan/fix_history.log"
+                        if os.path.exists(log_path):
+                            with open(log_path, 'r') as f:
+                                lines = f.readlines()[-20:]
+                            send_message(chat_id, "📋 最近修复日志:\n" + "".join(lines))
+                        else:
+                            send_message(chat_id, "暂无修复日志。")
+                    except Exception as e:
+                        send_message(chat_id, f"读取日志失败: {e}")
 
                 elif text:
-                    send_message(chat_id, f"💡 正在请求 OpenClaw AI...")
-                    # 🚀 雷达寻路逻辑
-                    success = False
-                    # 尝试这些可能的路径
-                    paths = ["/api/chat", "/chat", "/api/v1/chat", "/message"]
-                    for path in paths:
-                        try:
-                            payload = {
-                                "message": text, 
-                                "query": text,
-                                "session_id": "main",
-                                "agent_id": "main"
-                            }
-                            res = requests.post(f"{OPENCLAW_BASE}{path}", json=payload, timeout=5)
-                            dlog(f"DEBUG: 尝试路径 {path} -> 返回 {res.status_code}")
-                            
-                            if res.status_code == 200:
-                                data = res.json()
-                                ans = data.get("response") or data.get("data", {}).get("content") or data.get("text")
-                                if ans:
-                                    send_message(chat_id, f"🤖 OpenClaw ({path}) 回复：\n{ans}")
-                                    success = True
-                                    break
-                        except:
-                            continue
-                    
-                    if not success:
-                        send_message(chat_id, "❌ 自动寻路失败。OpenClaw 接口可能未开放 API 访问，或路径极其特殊。")
+                    send_message(chat_id, "❓ 未知指令，发送 0 查看可用指令列表")
                         
         time.sleep(1)
 
