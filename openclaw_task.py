@@ -101,12 +101,15 @@ def run_pdd_to_taobao_task(stop_event):
             try:
                 col_indices = pdd_page.evaluate('''() => {
                     let ths = document.querySelectorAll('th');
-                    let q_idx = -1, b_idx = -1;
+                    let q_visual = -1, b_visual = -1;
+                    // 计算每个 th 的"视觉列位置"（考虑 colspan）
+                    let visualPos = 0;
                     for(let i=0; i<ths.length; i++) {
-                        if(ths[i].innerText.includes('数量')) q_idx = i;
-                        if(ths[i].innerText.includes('买家')) b_idx = i;
+                        if(ths[i].innerText.includes('数量')) q_visual = visualPos;
+                        if(ths[i].innerText.includes('买家')) b_visual = visualPos;
+                        visualPos += parseInt(ths[i].getAttribute('colspan') || '1');
                     }
-                    return {qty: q_idx, buyer: b_idx};
+                    return {qty: q_visual, buyer: b_visual};
                 }''')
                 qty_col_idx = col_indices.get('qty', -1)
                 buyer_col_idx = col_indices.get('buyer', -1)
@@ -199,8 +202,17 @@ def run_pdd_to_taobao_task(stop_event):
                             extracted_qty = 1
                             if qty_col_idx != -1:
                                 try:
-                                    qty_text = row.locator(f'td:nth-child({qty_col_idx + 1})').inner_text()
-                                    match = re.search(r'\d+', qty_text)
+                                    qty_text = row.evaluate(f'''(row, targetVisual) => {{
+                                        let tds = row.querySelectorAll('td');
+                                        let pos = 0;
+                                        for (let td of tds) {{
+                                            let span = parseInt(td.getAttribute('colspan') || '1');
+                                            if (pos === targetVisual) return td.innerText.trim();
+                                            pos += span;
+                                        }}
+                                        return '';
+                                    }}''', qty_col_idx)
+                                    match = re.search(r'^\d+$', qty_text.strip())
                                     if match: extracted_qty = int(match.group())
                                 except: pass
 
@@ -575,6 +587,7 @@ def run_pdd_to_taobao_task(stop_event):
                                     time.sleep(1.5)
                                     if address_context.locator('input#fullName').first.is_visible(timeout=1000):
                                         dlog("   ∟ [失败] ❌ 终极地址保存异常，表单被系统拦截卡住。")
+                                        save_error_report("终极地址保存异常-表单被系统拦截卡住(合单)", "MERGE_ADDRESS", f"订单:{current_sn}")
                                         try:
                                             # Dump input values to diagnose
                                             dump_info = address_context.locator(':root').evaluate('''() => {
@@ -630,6 +643,7 @@ def run_pdd_to_taobao_task(stop_event):
                             
                         if not checked_matched:
                             dlog("   ∟ [严重失败] ❌ 多次探测仍未在最终页面找到买家信息！放弃提交。")
+                            save_error_report("合单最终页面找不到买家信息", "MERGE_ADDRESS", f"订单:{current_sn}")
                             processed_sns.add(current_sn)
                             continue
                         else:
@@ -662,9 +676,10 @@ def run_pdd_to_taobao_task(stop_event):
                     submit_success = False
                     for _ in range(4):
                         click_result = tb_page.evaluate('''() => {
+                            // 方式1: 通过 class 包含 'btn--' 的 div 查找
                             let btnContainer = Array.from(document.querySelectorAll('div')).find(el => 
                                 el.className && typeof el.className === 'string' && el.className.includes('btn--') && 
-                                el.innerText && el.innerText.includes('提交订单')
+                                el.innerText && (el.innerText.includes('提交订单') || el.innerText.includes('立即支付'))
                             );
                             if (btnContainer) {
                                 let inner = btnContainer.querySelector('div');
@@ -672,8 +687,11 @@ def run_pdd_to_taobao_task(stop_event):
                                 btnContainer.click();
                                 return 'CLICKED_NEW_DIV';
                             }
+                            // 方式2: 通过文本匹配叶子节点
                             let allNodes = Array.from(document.querySelectorAll('*'));
-                            let textNode = allNodes.find(el => el.innerText && el.innerText.trim().startsWith('提交订单') && el.children.length === 0);
+                            let textNode = allNodes.find(el => el.innerText && 
+                                (el.innerText.trim().startsWith('提交订单') || el.innerText.trim().startsWith('立即支付')) && 
+                                el.children.length === 0);
                             if (textNode) {
                                 textNode.click();
                                 if (textNode.parentElement) textNode.parentElement.click();
@@ -690,6 +708,7 @@ def run_pdd_to_taobao_task(stop_event):
                         
                     if not submit_success:
                         dlog("   ∟ [失败] ❌ 尝试多次仍未找到提交按钮，放弃该合单！")
+                        save_error_report("合单提交按钮找不到", "MERGE_ADDRESS", f"订单:{current_sn}")
                         continue
 
                     time.sleep(8) 
@@ -711,6 +730,7 @@ def run_pdd_to_taobao_task(stop_event):
                     
                     if tb_order_id in ["下单未成功", "单号提取失败"]:
                         dlog(f"   ∟ [失败] ❌ 警告：未找到合单待付款的新订单！")
+                        save_error_report(f"合单待付款订单未找到:{tb_order_id}", "MERGE_ADDRESS", f"订单:{current_sn}")
                         continue
                     else:
                         dlog(f"   ∟ [成功] ✅ 成功生成合单淘宝总单号: {tb_order_id}")
@@ -769,17 +789,18 @@ def run_pdd_to_taobao_task(stop_event):
                 dlog(f"\n🛒 [执行] 开始普通全自动淘宝下单: {current_sn}")
                 try:
                     current_order_block = pdd_page.locator(f'tbody:has-text("{current_sn}")').last
+
+                    # === 方案A：列表页直接复制（旧版PDD） ===
+                    copy_btn_found = False
                     try:
                         view_btn = current_order_block.locator('a:has-text("查看")').first
                         if view_btn.is_visible(): view_btn.click(force=True); time.sleep(1)
                     except: pass
-                    
                     try:
                         phone_btn = current_order_block.locator('a:has-text("查看手机号")').first
                         if phone_btn.is_visible(): phone_btn.click(force=True); time.sleep(1.5)
                     except: pass
 
-                    copy_btn_found = False
                     pyperclip.copy("")
                     copy_btns = current_order_block.locator('a:has-text("复制")').all()
                     for btn in copy_btns:
@@ -792,8 +813,116 @@ def run_pdd_to_taobao_task(stop_event):
                                 break
                         except: pass
 
+                    # === 方案B：跳转详情页获取收货信息（新版PDD改版适配） ===
                     if not copy_btn_found:
-                        dlog("   ∟ [失败] ❌ 未找到【复制完整信息】按钮或复制内容无效。"); processed_sns.add(current_sn); continue
+                        dlog("   ∟ [提示] 列表页无复制按钮，跳转订单详情页获取收货信息...")
+                        try:
+                            detail_url = f"https://mms.pinduoduo.com/orders/detail?sn={current_sn}"
+                            pdd_page.goto(detail_url)
+                            time.sleep(3)
+
+                            # 点击【查看姓名和地址】解密完整信息
+                            try:
+                                unmask_btn = pdd_page.locator('span:has-text("查看姓名和地址"), a:has-text("查看姓名和地址")').first
+                                if unmask_btn.is_visible(timeout=3000):
+                                    unmask_btn.click(force=True)
+                                    time.sleep(2)
+                                    dlog("   ∟ [动作] 已点击【查看姓名和地址】解密。")
+                            except: pass
+
+                            # 点击【查看手机号】解密手机号
+                            try:
+                                phone_unmask = pdd_page.locator('span:has-text("查看手机号"), a:has-text("查看手机号")').first
+                                if phone_unmask.is_visible(timeout=2000):
+                                    phone_unmask.click(force=True)
+                                    time.sleep(2)
+                                    dlog("   ∟ [动作] 已点击【查看手机号】解密。")
+                            except: pass
+
+                            # 尝试点击地址区域旁边的"复制"按钮
+                            pyperclip.copy("")
+                            try:
+                                # 详情页地址区域的复制按钮：在"联系地址"附近的最后一个复制按钮
+                                detail_copy_btns = pdd_page.locator('a:has-text("复制"), button:has-text("复制")').all()
+                                for btn in detail_copy_btns:
+                                    try:
+                                        btn.click(force=True)
+                                        time.sleep(1)
+                                        clip_text = pyperclip.paste().replace('\n', ' ').replace('\r', ' ').strip()
+                                        if "省" in clip_text or "市" in clip_text or "区" in clip_text or "县" in clip_text:
+                                            copy_btn_found = True
+                                            dlog("   ∟ [成功] ✅ 详情页复制按钮获取到地址信息！")
+                                            break
+                                    except: pass
+                            except: pass
+
+                            # 兜底：直接从详情页DOM抓取收货信息
+                            if not copy_btn_found:
+                                try:
+                                    scraped = pdd_page.evaluate('''() => {
+                                        let info = {};
+                                        let allEls = Array.from(document.querySelectorAll('*'));
+                                        
+                                        // 找收货人
+                                        let nameLabel = allEls.find(el => el.innerText && el.innerText.trim() === '收货人' && el.children.length === 0);
+                                        if (nameLabel && nameLabel.parentElement) {
+                                            let row = nameLabel.parentElement;
+                                            let texts = Array.from(row.querySelectorAll('*')).filter(el => 
+                                                el.children.length === 0 && el.innerText && 
+                                                !['收货人', '复制'].includes(el.innerText.trim()) &&
+                                                el.innerText.trim().length < 30 && el.innerText.trim().length > 0
+                                            ).map(el => el.innerText.trim());
+                                            info.name = texts.length > 0 ? texts[0] : '';
+                                        }
+                                        
+                                        // 找手机号
+                                        let phoneLabel = allEls.find(el => el.innerText && el.innerText.trim() === '手机号' && el.children.length === 0);
+                                        if (phoneLabel && phoneLabel.parentElement) {
+                                            let row = phoneLabel.parentElement;
+                                            let texts = Array.from(row.querySelectorAll('*')).filter(el => 
+                                                el.children.length === 0 && el.innerText && 
+                                                !['手机号', '复制', '查看手机号'].includes(el.innerText.trim()) &&
+                                                el.innerText.trim().length > 3 && el.innerText.trim().length < 20
+                                            ).map(el => el.innerText.trim());
+                                            info.phone = texts.length > 0 ? texts[0] : '';
+                                        }
+                                        
+                                        // 找联系地址
+                                        let addrLabel = allEls.find(el => el.innerText && el.innerText.trim() === '联系地址' && el.children.length === 0);
+                                        if (addrLabel && addrLabel.parentElement) {
+                                            let row = addrLabel.parentElement;
+                                            let fullText = row.innerText;
+                                            fullText = fullText.replace('联系地址', '').replace('查看姓名和地址', '').replace('查看手机号', '').replace(/复制/g, '').replace('联系买家', '').trim();
+                                            info.address = fullText;
+                                        }
+                                        
+                                        return JSON.stringify(info);
+                                    }''')
+                                    scraped_info = json.loads(scraped)
+                                    if scraped_info.get('address') and ('省' in scraped_info['address'] or '市' in scraped_info['address']):
+                                        # 把抓取到的信息拼接成 pyperclip 可用的格式
+                                        assembled = f"{scraped_info.get('name', '')} {scraped_info.get('phone', '')} {scraped_info.get('address', '')}"
+                                        pyperclip.copy(assembled)
+                                        copy_btn_found = True
+                                        dlog(f"   ∟ [成功] ✅ 从详情页DOM直接抓取到收货信息！")
+                                        dlog(f"   ∟ [详情页] 收货人:{scraped_info.get('name','')} 手机:{scraped_info.get('phone','')} 地址:{scraped_info.get('address','')[:20]}...")
+                                except Exception as e:
+                                    dlog(f"   ∟ [报错] 详情页DOM抓取失败: {e}")
+
+                            # 回到订单列表页
+                            pdd_page.goto("https://mms.pinduoduo.com/orders/list?tab=1")
+                            time.sleep(3)
+                        except Exception as e:
+                            dlog(f"   ∟ [报错] 详情页跳转获取失败: {e}")
+                            try:
+                                pdd_page.goto("https://mms.pinduoduo.com/orders/list?tab=1")
+                                time.sleep(3)
+                            except: pass
+
+                    if not copy_btn_found:
+                        dlog("   ∟ [失败] ❌ 列表页和详情页均未能获取收货信息。")
+                        save_error_report("未找到复制按钮或复制内容无效(列表页+详情页均失败)", "PLACE_ORDER", f"订单:{current_sn}")
+                        processed_sns.add(current_sn); continue
 
                     raw_info = pyperclip.paste().replace('\n', ' ').replace('\r', ' ').strip()
                     phone_match = re.search(r'(1[3-9]\d{9}|0\d{2,3}-\d{7,8})', raw_info)
@@ -861,7 +990,9 @@ def run_pdd_to_taobao_task(stop_event):
                     try:
                         tb_page.get_by_text("立即购买").first.click(force=True); time.sleep(4)
                     except Exception as e:
-                        dlog(f"   ∟ [失败] ❌ 淘宝点击立即购买失败: {e}"); processed_sns.add(current_sn); continue
+                        dlog(f"   ∟ [失败] ❌ 淘宝点击立即购买失败: {e}")
+                        save_error_report(e, "PLACE_ORDER", f"订单:{current_sn} 立即购买按钮点击失败")
+                        processed_sns.add(current_sn); continue
 
                     address_filled_success = False 
                     dlog("   ∟ [动作] 检查已有地址是否匹配...")
@@ -1010,6 +1141,7 @@ def run_pdd_to_taobao_task(stop_event):
                                     time.sleep(1.5)
                                     if address_context.locator('input#fullName').first.is_visible(timeout=1000):
                                         dlog("   ∟ [失败] ❌ 终极地址保存异常，表单被系统拦截卡住。")
+                                        save_error_report("终极地址保存异常-表单被系统拦截卡住(单笔)", "PLACE_ORDER_ADDRESS", f"订单:{current_sn}")
                                         try:
                                             # Dump input values to diagnose
                                             dump_info = address_context.locator(':root').evaluate('''() => {
@@ -1065,6 +1197,7 @@ def run_pdd_to_taobao_task(stop_event):
                             
                         if not checked_matched:
                             dlog("   ∟ [严重失败] ❌ 多次探测仍未在最终页面找到买家信息！放弃提交。")
+                            save_error_report("单笔下单最终页面找不到买家信息", "PLACE_ORDER_ADDRESS", f"订单:{current_sn}")
                             processed_sns.add(current_sn)
                             continue
                         else:
@@ -1097,9 +1230,10 @@ def run_pdd_to_taobao_task(stop_event):
                     submit_success = False
                     for _ in range(4):
                         click_result = tb_page.evaluate('''() => {
+                            // 方式1: 通过 class 包含 'btn--' 的 div 查找
                             let btnContainer = Array.from(document.querySelectorAll('div')).find(el => 
                                 el.className && typeof el.className === 'string' && el.className.includes('btn--') && 
-                                el.innerText && el.innerText.includes('提交订单')
+                                el.innerText && (el.innerText.includes('提交订单') || el.innerText.includes('立即支付'))
                             );
                             if (btnContainer) {
                                 let inner = btnContainer.querySelector('div');
@@ -1107,8 +1241,11 @@ def run_pdd_to_taobao_task(stop_event):
                                 btnContainer.click();
                                 return 'CLICKED_NEW_DIV';
                             }
+                            // 方式2: 通过文本匹配叶子节点
                             let allNodes = Array.from(document.querySelectorAll('*'));
-                            let textNode = allNodes.find(el => el.innerText && el.innerText.trim().startsWith('提交订单') && el.children.length === 0);
+                            let textNode = allNodes.find(el => el.innerText && 
+                                (el.innerText.trim().startsWith('提交订单') || el.innerText.trim().startsWith('立即支付')) && 
+                                el.children.length === 0);
                             if (textNode) {
                                 textNode.click();
                                 if (textNode.parentElement) textNode.parentElement.click();
@@ -1125,6 +1262,7 @@ def run_pdd_to_taobao_task(stop_event):
                         
                     if not submit_success:
                         dlog("   ∟ [失败] ❌ 尝试多次仍未找到提交按钮，放弃该单！")
+                        save_error_report("单笔提交按钮找不到", "PLACE_ORDER", f"订单:{current_sn}")
                         processed_sns.add(current_sn)
                         continue
                         
@@ -1144,7 +1282,9 @@ def run_pdd_to_taobao_task(stop_event):
                     }''')
                     
                     if tb_order_id in ["下单未成功", "单号提取失败"]:
-                        dlog(f"   ∟ [失败] ❌ 警告：未找到待付款的新订单！停止回填。"); processed_sns.add(current_sn); continue
+                        dlog(f"   ∟ [失败] ❌ 警告：未找到待付款的新订单！停止回填。")
+                        save_error_report(f"单笔待付款订单未找到:{tb_order_id}", "PLACE_ORDER", f"订单:{current_sn}")
+                        processed_sns.add(current_sn); continue
                     else:
                         dlog(f"   ∟ [成功] ✅ 成功抓取到待付款淘宝订单号: {tb_order_id}")
                         pdd_page.bring_to_front()
