@@ -672,38 +672,57 @@ def run_pdd_to_taobao_task(stop_event):
                         dlog(f"   ∟ [跳过] 币种勾选异常: {e}")
                     # ========================================================================
 
-                    dlog("   ∟ [动作] 🚀 准备点击新版提交订单...")
+                    dlog("   ∟ [动作] 🚀 准备点击提交订单...")
                     submit_success = False
-                    for _ in range(4):
+                    for attempt in range(6):
+                        # 策略1: Playwright 原生 get_by_text（最稳定）
+                        try:
+                            submit_loc = tb_page.get_by_text("提交订单", exact=False).first
+                            if submit_loc.is_visible(timeout=1500):
+                                try: submit_loc.click(force=True)
+                                except: submit_loc.evaluate("node => node.click()")
+                                dlog("   ∟ [底层] 成功触发提交 (PLAYWRIGHT_TEXT)")
+                                submit_success = True; break
+                        except: pass
+                        # 策略2: Playwright 匹配 "立即支付"
+                        try:
+                            pay_loc = tb_page.get_by_text("立即支付", exact=False).first
+                            if pay_loc.is_visible(timeout=1500):
+                                try: pay_loc.click(force=True)
+                                except: pay_loc.evaluate("node => node.click()")
+                                dlog("   ∟ [底层] 成功触发提交 (PLAYWRIGHT_PAY)")
+                                submit_success = True; break
+                        except: pass
+                        # 策略3: JS 宽泛匹配（不限定 class 和叶子节点）
                         click_result = tb_page.evaluate('''() => {
-                            // 方式1: 通过 class 包含 'btn--' 的 div 查找
-                            let btnContainer = Array.from(document.querySelectorAll('div')).find(el => 
-                                el.className && typeof el.className === 'string' && el.className.includes('btn--') && 
-                                el.innerText && (el.innerText.includes('提交订单') || el.innerText.includes('立即支付'))
-                            );
-                            if (btnContainer) {
-                                let inner = btnContainer.querySelector('div');
-                                if (inner) inner.click();
-                                btnContainer.click();
-                                return 'CLICKED_NEW_DIV';
+                            const keywords = ['提交订单', '立即支付'];
+                            // 3a: 任意元素文本匹配
+                            let all = Array.from(document.querySelectorAll('div, button, a, span'));
+                            let btn = all.find(el => {
+                                let t = (el.innerText || el.textContent || '').trim();
+                                return keywords.some(k => t === k || t.startsWith(k)) && t.length < 10;
+                            });
+                            if (btn) {
+                                btn.click();
+                                if (btn.parentElement) btn.parentElement.click();
+                                return 'CLICKED_JS_BROAD';
                             }
-                            // 方式2: 通过文本匹配叶子节点
-                            let allNodes = Array.from(document.querySelectorAll('*'));
-                            let textNode = allNodes.find(el => el.innerText && 
-                                (el.innerText.trim().startsWith('提交订单') || el.innerText.trim().startsWith('立即支付')) && 
-                                el.children.length === 0);
-                            if (textNode) {
-                                textNode.click();
-                                if (textNode.parentElement) textNode.parentElement.click();
-                                return 'CLICKED_LEAF_NODE';
+                            // 3b: class 模糊匹配常见按钮样式
+                            let styled = all.find(el => {
+                                let cls = (typeof el.className === 'string') ? el.className : '';
+                                let t = (el.innerText || '').trim();
+                                return (cls.includes('btn') || cls.includes('submit') || cls.includes('go-') || cls.includes('order'))
+                                    && keywords.some(k => t.includes(k));
+                            });
+                            if (styled) {
+                                styled.click();
+                                return 'CLICKED_JS_STYLED';
                             }
                             return 'NOT_FOUND';
                         }''')
-                        
                         if click_result != 'NOT_FOUND':
                             dlog(f"   ∟ [底层] 成功触发提交 ({click_result})")
-                            submit_success = True
-                            break
+                            submit_success = True; break
                         time.sleep(1.5)
                         
                     if not submit_success:
@@ -1226,38 +1245,57 @@ def run_pdd_to_taobao_task(stop_event):
                         dlog(f"   ∟ [跳过] 币种勾选异常: {e}")
                     # ========================================================================
 
-                    dlog("   ∟ [动作] 🚀 准备点击新版提交订单...")
+                    dlog("   ∟ [动作] 🚀 准备点击提交订单...")
                     submit_success = False
-                    for _ in range(4):
+                    for attempt in range(6):
+                        # 策略1: Playwright 原生 get_by_text（最稳定）
+                        try:
+                            submit_loc = tb_page.get_by_text("提交订单", exact=False).first
+                            if submit_loc.is_visible(timeout=1500):
+                                try: submit_loc.click(force=True)
+                                except: submit_loc.evaluate("node => node.click()")
+                                dlog("   ∟ [底层] 成功触发提交 (PLAYWRIGHT_TEXT)")
+                                submit_success = True; break
+                        except: pass
+                        # 策略2: Playwright 匹配 "立即支付"
+                        try:
+                            pay_loc = tb_page.get_by_text("立即支付", exact=False).first
+                            if pay_loc.is_visible(timeout=1500):
+                                try: pay_loc.click(force=True)
+                                except: pay_loc.evaluate("node => node.click()")
+                                dlog("   ∟ [底层] 成功触发提交 (PLAYWRIGHT_PAY)")
+                                submit_success = True; break
+                        except: pass
+                        # 策略3: JS 宽泛匹配（不限定 class 和叶子节点）
                         click_result = tb_page.evaluate('''() => {
-                            // 方式1: 通过 class 包含 'btn--' 的 div 查找
-                            let btnContainer = Array.from(document.querySelectorAll('div')).find(el => 
-                                el.className && typeof el.className === 'string' && el.className.includes('btn--') && 
-                                el.innerText && (el.innerText.includes('提交订单') || el.innerText.includes('立即支付'))
-                            );
-                            if (btnContainer) {
-                                let inner = btnContainer.querySelector('div');
-                                if (inner) inner.click();
-                                btnContainer.click();
-                                return 'CLICKED_NEW_DIV';
+                            const keywords = ['提交订单', '立即支付'];
+                            // 3a: 任意元素文本匹配
+                            let all = Array.from(document.querySelectorAll('div, button, a, span'));
+                            let btn = all.find(el => {
+                                let t = (el.innerText || el.textContent || '').trim();
+                                return keywords.some(k => t === k || t.startsWith(k)) && t.length < 10;
+                            });
+                            if (btn) {
+                                btn.click();
+                                if (btn.parentElement) btn.parentElement.click();
+                                return 'CLICKED_JS_BROAD';
                             }
-                            // 方式2: 通过文本匹配叶子节点
-                            let allNodes = Array.from(document.querySelectorAll('*'));
-                            let textNode = allNodes.find(el => el.innerText && 
-                                (el.innerText.trim().startsWith('提交订单') || el.innerText.trim().startsWith('立即支付')) && 
-                                el.children.length === 0);
-                            if (textNode) {
-                                textNode.click();
-                                if (textNode.parentElement) textNode.parentElement.click();
-                                return 'CLICKED_LEAF_NODE';
+                            // 3b: class 模糊匹配常见按钮样式
+                            let styled = all.find(el => {
+                                let cls = (typeof el.className === 'string') ? el.className : '';
+                                let t = (el.innerText || '').trim();
+                                return (cls.includes('btn') || cls.includes('submit') || cls.includes('go-') || cls.includes('order'))
+                                    && keywords.some(k => t.includes(k));
+                            });
+                            if (styled) {
+                                styled.click();
+                                return 'CLICKED_JS_STYLED';
                             }
                             return 'NOT_FOUND';
                         }''')
-                        
                         if click_result != 'NOT_FOUND':
                             dlog(f"   ∟ [底层] 成功触发提交 ({click_result})")
-                            submit_success = True
-                            break
+                            submit_success = True; break
                         time.sleep(1.5)
                         
                     if not submit_success:
